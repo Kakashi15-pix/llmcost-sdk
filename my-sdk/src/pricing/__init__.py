@@ -9,10 +9,12 @@ from pricing.extractors import (
     get_extractor,
 )
 from pricing.aggregator import (
-    CostAggregator,
-    RequestCost,
-    AggregatedMetrics,
+    RequestDetailsBuffer,
+    RequestDetails,
+    get_request_buffer,
     get_cost_aggregator,
+    FLUSH_BATCH_SIZE,
+    FLUSH_INTERVAL_SECONDS,
 )
 from pricing.interceptor import (
     CostInterceptor,
@@ -32,11 +34,13 @@ __all__ = [
     "AnthropicExtractor",
     "OpenAIExtractor",
     "get_extractor",
-    # Aggregator
-    "CostAggregator",
-    "RequestCost",
-    "AggregatedMetrics",
+    # Buffer (replaces aggregator)
+    "RequestDetailsBuffer",
+    "RequestDetails",
+    "get_request_buffer",
     "get_cost_aggregator",
+    "FLUSH_BATCH_SIZE",
+    "FLUSH_INTERVAL_SECONDS",
     # Interceptor
     "CostInterceptor",
     "AnthropicInterceptor",

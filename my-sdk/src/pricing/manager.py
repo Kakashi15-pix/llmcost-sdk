@@ -29,7 +29,7 @@ class PricingManager:
         self._load_pricing()
 
     def _load_sync_state(self) -> Dict[str, Any]:
-        """Load sync state tracking."""
+       
         if PRICING_SYNC_STATE_PATH.exists():
             try:
                 with open(PRICING_SYNC_STATE_PATH) as f:

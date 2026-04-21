@@ -38,16 +38,17 @@ class CostInterceptor:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[CostBreakdown]:
         """
-        Process API response to extract and compute cost.
+        Process API response to extract and record request details.
+        Cost computation is deferred to backend.
         
         Args:
             response: API response dict from provider
             provider: Provider name ('anthropic', 'openai', etc.)
             request_id: Optional request tracking ID
-            metadata: Optional metadata to attach to cost record
+            metadata: Optional metadata to attach to request
         
         Returns:
-            CostBreakdown with computed costs, or None if extraction failed
+            CostBreakdown with extracted details (cost fields not populated), or None if extraction failed
         """
         if not response:
             return None
@@ -70,28 +71,27 @@ class CostInterceptor:
             logger.warning("Failed to extract model from response")
             return None
 
-        # Get pricing
-        pricing = self.pricing_manager.get_pricing(model, provider)
-        if not pricing:
-            logger.warning(f"No pricing found for model: {model}")
-            return None
-
-        # Compute cost
-        cost_breakdown = extractor.compute_cost(usage, pricing)
-        cost_breakdown.model = model
-        cost_breakdown.provider = provider
+        # Create cost breakdown for return (note: cost fields are 0)
+        cost_breakdown = CostBreakdown(
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+            cache_creation_tokens=usage.get("cache_creation_tokens", 0),
+            cache_read_tokens=usage.get("cache_read_tokens", 0),
+            model=model,
+            provider=provider,
+            raw_usage=usage,
+        )
 
         # Extract stop reason if available
         if hasattr(extractor, 'extract_stop_reason'):
             cost_breakdown.stop_reason = extractor.extract_stop_reason(response)
 
-        # Record cost
+        # Record request details to buffer (cost computation deferred to backend)
         request_id = request_id or str(uuid.uuid4())
         self.aggregator.record_request(
             request_id=request_id,
             model=model,
             provider=provider,
-            total_cost=cost_breakdown.total_cost,
             input_tokens=cost_breakdown.input_tokens,
             output_tokens=cost_breakdown.output_tokens,
             cache_read_tokens=cost_breakdown.cache_read_tokens,
@@ -100,25 +100,13 @@ class CostInterceptor:
             metadata=metadata,
         )
 
-        logger.info(
-            f"Cost computed for {provider}/{model}: "
-            f"${cost_breakdown.total_cost:.6f} "
-            f"({cost_breakdown.input_tokens} in, {cost_breakdown.output_tokens} out)"
+        logger.debug(
+            f"Recorded request details for {provider}/{model}: "
+            f"({cost_breakdown.input_tokens} in, {cost_breakdown.output_tokens} out, "
+            f"{cost_breakdown.cache_read_tokens} cache_read, {cost_breakdown.cache_creation_tokens} cache_creation)"
         )
 
         return cost_breakdown
-
-    def get_aggregated_metrics(self):
-        """Get aggregated cost metrics."""
-        return self.aggregator.get_aggregated_metrics()
-
-    def get_metrics_in_window(self, minutes: int = 60):
-        """Get metrics for requests in last N minutes."""
-        return self.aggregator.get_metrics_in_window(minutes)
-
-    def export_costs(self, filepath: str) -> None:
-        """Export all recorded costs to JSON."""
-        self.aggregator.export_requests(filepath)
 
 
 class AnthropicInterceptor(CostInterceptor):

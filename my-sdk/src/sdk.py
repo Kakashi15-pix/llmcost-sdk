@@ -112,42 +112,20 @@ class CostAnalyticsSDK:
         return None
 
     def get_metrics(self) -> Dict[str, Any]:
-        """Get aggregated cost metrics."""
-        metrics = self.aggregator.get_aggregated_metrics()
-        return metrics.to_dict()
+        """Get request buffer size and pending requests (metrics now computed on backend)."""
+        return {
+            "buffer_size": self.aggregator.get_buffer_size(),
+            "pending_requests": len(self.aggregator.get_pending_requests()),
+        }
 
-    def get_metrics_window(self, minutes: int = 60) -> Dict[str, Any]:
-        """Get aggregated metrics for time window."""
-        metrics = self.aggregator.get_metrics_in_window(minutes=minutes)
-        return metrics.to_dict()
+    def get_pending_requests(self) -> list:
+        """Get all pending requests awaiting flush to backend."""
+        return [r.to_dict() for r in self.aggregator.get_pending_requests()]
 
-    def get_requests(self) -> list:
-        """Get all recorded requests."""
-        return [r.to_dict() for r in self.aggregator.requests]
-
-    def get_requests_for_model(self, model: str) -> list:
-        """Get requests for specific model."""
-        return [
-            r.to_dict() for r in self.aggregator.requests
-            if r.model == model
-        ]
-
-    def get_requests_for_provider(self, provider: str) -> list:
-        """Get requests for specific provider."""
-        return [
-            r.to_dict() for r in self.aggregator.requests
-            if r.provider == provider
-        ]
-
-    def export_metrics(self, filepath: str) -> None:
-        """Export all recorded costs to JSON."""
-        self.aggregator.export_requests(filepath)
-        logger.info(f"Exported metrics to {filepath}")
-
-    def clear_metrics(self) -> None:
-        """Clear all recorded metrics."""
-        self.aggregator.clear()
-        logger.info("Cleared all metrics")
+    def flush_buffer(self) -> None:
+        """Manually flush the request buffer to backend."""
+        self.aggregator.flush()
+        logger.info("Buffer flushed manually")
 
     def sync_pricing(self) -> bool:
         """

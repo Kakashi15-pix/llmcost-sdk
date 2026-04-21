@@ -9,15 +9,17 @@ from pricing import (
     AnthropicExtractor,
     OpenAIExtractor,
     get_extractor,
-    CostAggregator,
-    RequestCost,
-    AggregatedMetrics,
+    RequestDetailsBuffer,
+    RequestDetails,
+    get_request_buffer,
     get_cost_aggregator,
     CostInterceptor,
     AnthropicInterceptor,
     OpenAIInterceptor,
     wrap_anthropic_client,
     wrap_openai_client,
+    FLUSH_BATCH_SIZE,
+    FLUSH_INTERVAL_SECONDS,
 )
 
 __version__ = "0.1.0"
@@ -34,11 +36,13 @@ __all__ = [
     "AnthropicExtractor",
     "OpenAIExtractor",
     "get_extractor",
-    # Aggregator
-    "CostAggregator",
-    "RequestCost",
-    "AggregatedMetrics",
+    # Buffer (replaces aggregator)
+    "RequestDetailsBuffer",
+    "RequestDetails",
+    "get_request_buffer",
     "get_cost_aggregator",
+    "FLUSH_BATCH_SIZE",
+    "FLUSH_INTERVAL_SECONDS",
     # Interceptor
     "CostInterceptor",
     "AnthropicInterceptor",

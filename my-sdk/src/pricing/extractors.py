@@ -260,6 +260,14 @@ EXTRACTORS: Dict[str, type] = {
 
 
 def get_extractor(provider: str) -> Optional[CostExtractor]:
+    """Return an extractor instance for the given provider."""
+    extractor_cls = EXTRACTORS.get(provider.lower()) if provider else None
+    if not extractor_cls:
+        return None
+    return extractor_cls()
+
+
+def get_extractor(provider: str) -> Optional[CostExtractor]:
     """Get cost extractor for provider."""
     extractor_class = EXTRACTORS.get(provider.lower())
     if extractor_class:
