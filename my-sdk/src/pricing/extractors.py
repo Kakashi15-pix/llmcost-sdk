@@ -266,11 +266,3 @@ def get_extractor(provider: str) -> Optional[CostExtractor]:
         return None
     return extractor_cls()
 
-
-def get_extractor(provider: str) -> Optional[CostExtractor]:
-    """Get cost extractor for provider."""
-    extractor_class = EXTRACTORS.get(provider.lower())
-    if extractor_class:
-        return extractor_class()
-    logger.warning(f"No extractor available for provider: {provider}")
-    return None

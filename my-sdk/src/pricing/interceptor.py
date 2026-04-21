@@ -1,23 +1,19 @@
 """
 Interceptor middleware for LLM client libraries.
-Extracts cost information from API responses without modifying request/response.
+Forwards request/response details to backend where extraction and cost computation happen.
 """
-from typing import Any, Callable, Optional, Dict
+from typing import Any, Optional, Dict
 import logging
 import uuid
 
 from pricing.manager import get_pricing_manager
-from pricing.extractors import get_extractor, CostBreakdown
+from pricing.extractors import CostBreakdown
 from pricing.aggregator import get_cost_aggregator
 
 logger = logging.getLogger(__name__)
 
 
 class CostInterceptor:
-    """
-    Intercepts LLM API responses to extract and compute costs.
-    Works with signal-plus-pull model: credentials never leave client.
-    """
 
     def __init__(self, auto_sync_pricing: bool = True):
         self.pricing_manager = get_pricing_manager()
@@ -25,7 +21,6 @@ class CostInterceptor:
         self.auto_sync_pricing = auto_sync_pricing
 
     def sync_pricing(self) -> None:
-        """Sync pricing from upstream (silent fallback on failure)."""
         if not self.auto_sync_pricing:
             return
         self.pricing_manager.sync_from_upstream()
@@ -39,7 +34,7 @@ class CostInterceptor:
     ) -> Optional[CostBreakdown]:
         """
         Process API response to extract and record request details.
-        Cost computation is deferred to backend.
+        Extraction and cost computation are handled by backend.
         
         Args:
             response: API response dict from provider
@@ -48,62 +43,49 @@ class CostInterceptor:
             metadata: Optional metadata to attach to request
         
         Returns:
-            CostBreakdown with extracted details (cost fields not populated), or None if extraction failed
+            CostBreakdown placeholder (no local extraction/cost computation),
+            or None if request could not be recorded.
         """
         if not response:
             return None
 
-        # Get provider-specific extractor
-        extractor = get_extractor(provider)
-        if not extractor:
-            logger.error(f"No extractor for provider: {provider}")
-            return None
+        request_id = request_id or str(uuid.uuid4())
+        request_metadata: Dict[str, Any] = dict(metadata or {})
+        request_metadata["raw_response"] = response
+        request_metadata["backend_extraction"] = True
 
-        # Extract usage
-        usage = extractor.extract_usage(response)
-        if not usage:
-            logger.warning(f"Failed to extract usage from {provider} response")
-            return None
+        # Keep lightweight local fields for observability only.
+        model = response.get("model", "unknown")
+        stop_reason = response.get("stop_reason")
 
-        # Extract model
-        model = extractor.extract_model(response)
-        if not model:
-            logger.warning("Failed to extract model from response")
-            return None
-
-        # Create cost breakdown for return (note: cost fields are 0)
+        # Placeholder object returned for compatibility with existing API.
         cost_breakdown = CostBreakdown(
-            input_tokens=usage.get("input_tokens", 0),
-            output_tokens=usage.get("output_tokens", 0),
-            cache_creation_tokens=usage.get("cache_creation_tokens", 0),
-            cache_read_tokens=usage.get("cache_read_tokens", 0),
+            input_tokens=0,
+            output_tokens=0,
+            cache_creation_tokens=0,
+            cache_read_tokens=0,
             model=model,
             provider=provider,
-            raw_usage=usage,
+            stop_reason=stop_reason,
+            raw_usage={"backend_extraction": True},
         )
 
-        # Extract stop reason if available
-        if hasattr(extractor, 'extract_stop_reason'):
-            cost_breakdown.stop_reason = extractor.extract_stop_reason(response)
-
-        # Record request details to buffer (cost computation deferred to backend)
-        request_id = request_id or str(uuid.uuid4())
+        # Record request details for backend extraction/costing.
         self.aggregator.record_request(
             request_id=request_id,
             model=model,
             provider=provider,
-            input_tokens=cost_breakdown.input_tokens,
-            output_tokens=cost_breakdown.output_tokens,
-            cache_read_tokens=cost_breakdown.cache_read_tokens,
-            cache_creation_tokens=cost_breakdown.cache_creation_tokens,
-            stop_reason=cost_breakdown.stop_reason,
-            metadata=metadata,
+            input_tokens=0,
+            output_tokens=0,
+            cache_read_tokens=0,
+            cache_creation_tokens=0,
+            stop_reason=stop_reason,
+            metadata=request_metadata,
         )
 
         logger.debug(
-            f"Recorded request details for {provider}/{model}: "
-            f"({cost_breakdown.input_tokens} in, {cost_breakdown.output_tokens} out, "
-            f"{cost_breakdown.cache_read_tokens} cache_read, {cost_breakdown.cache_creation_tokens} cache_creation)"
+            f"Recorded request {request_id} for backend extraction "
+            f"({provider}/{model})"
         )
 
         return cost_breakdown
