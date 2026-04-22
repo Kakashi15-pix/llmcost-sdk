@@ -1,6 +1,6 @@
 """Main SDK client for unified cost tracking."""
 
-from typing import Any, Optional, Dict
+from typing import Any, Optional, Dict, Callable
 import logging
 
 from pricing import (
@@ -9,6 +9,7 @@ from pricing import (
     get_pricing_manager,
     wrap_anthropic_client,
     wrap_openai_client,
+    wrap_custom_client,
 )
 
 logger = logging.getLogger(__name__)
@@ -76,6 +77,36 @@ class CostAnalyticsSDK:
             response = client.chat.completions.create(...)
         """
         return wrap_openai_client(client)
+
+    def wrap_custom_client(
+        self,
+        client: Any,
+        provider: str,
+        method_path: str,
+        response_to_dict: Optional[Callable[[Any], Dict[str, Any]]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        """
+        Wrap any provider client method path for tracking.
+
+        Args:
+            client: Provider SDK client instance
+            provider: Provider identifier (e.g. 'cohere', 'groq', 'mistral')
+            method_path: Dotted callable path on client
+            response_to_dict: Optional response conversion function
+            metadata: Optional static metadata attached to tracked request
+
+        Returns:
+            Wrapped client (modified in place)
+        """
+        return wrap_custom_client(
+            client=client,
+            provider=provider,
+            method_path=method_path,
+            response_to_dict=response_to_dict,
+            interceptor=self.interceptor,
+            static_metadata=metadata,
+        )
 
     def process_response(
         self,

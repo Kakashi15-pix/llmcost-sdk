@@ -3,13 +3,15 @@ Pricing configuration and management for LLM providers.
 Implements signal-plus-pull model with primary upstream sync and local fallback.
 """
 import json
-import os
 import hashlib
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Callable
 from pathlib import Path
 import requests
 import logging
+
+from pricing.extractors import get_extractor, CostBreakdown
+from pricing.aggregator import RequestDetails, RequestDetailsBuffer, get_request_buffer
 
 logger = logging.getLogger(__name__)
 
@@ -169,8 +171,119 @@ class PricingManager:
             self._save_cache()
 
 
+class BackendPricingOrchestrator:
+    """
+    Server-side orchestrator for interceptor -> aggregator -> extractor flow.
+
+    Interceptor buffers raw response payloads. On flush, this orchestrator:
+    1. extracts usage/model via provider extractor,
+    2. resolves pricing,
+    3. computes cost,
+    4. optionally persists processed records via callback.
+    """
+
+    def __init__(
+        self,
+        pricing_manager: Optional[PricingManager] = None,
+        on_persist: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
+    ):
+        self.pricing_manager = pricing_manager or get_pricing_manager()
+        self.on_persist = on_persist
+
+    def register_buffer(self, buffer: Optional[RequestDetailsBuffer] = None) -> RequestDetailsBuffer:
+        """Attach this orchestrator to a request buffer flush callback."""
+        request_buffer = buffer or get_request_buffer()
+        request_buffer.set_on_flush(self.process_batch)
+        return request_buffer
+
+    def process_batch(self, batch: List[RequestDetails]) -> List[Dict[str, Any]]:
+        """Process a flushed request batch and optionally persist it."""
+        processed: List[Dict[str, Any]] = []
+
+        for request in batch:
+            record = self.process_request(request)
+            if record:
+                processed.append(record)
+
+        if self.on_persist and processed:
+            self.on_persist(processed)
+
+        return processed
+
+    def process_request(self, request: RequestDetails) -> Optional[Dict[str, Any]]:
+        """Process one request details record into a costed backend record."""
+        provider = (request.provider or "").lower()
+        model = request.model
+        stop_reason = request.stop_reason
+        usage = {
+            "input_tokens": request.input_tokens,
+            "output_tokens": request.output_tokens,
+            "cache_creation_tokens": request.cache_creation_tokens,
+            "cache_read_tokens": request.cache_read_tokens,
+        }
+
+        metadata = request.metadata or {}
+        raw_response = metadata.get("raw_response") if isinstance(metadata, dict) else None
+
+        extractor = get_extractor(provider)
+        if extractor and isinstance(raw_response, dict):
+            extracted_usage = extractor.extract_usage(raw_response)
+            if extracted_usage:
+                usage = extracted_usage
+
+            extracted_model = extractor.extract_model(raw_response)
+            if extracted_model:
+                model = extracted_model
+
+            if hasattr(extractor, "extract_stop_reason"):
+                extracted_stop_reason = extractor.extract_stop_reason(raw_response)
+                if extracted_stop_reason:
+                    stop_reason = extracted_stop_reason
+
+        pricing = self.pricing_manager.get_pricing(model, provider=provider) or {}
+        breakdown = CostBreakdown(
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+            cache_creation_tokens=usage.get("cache_creation_tokens", 0),
+            cache_read_tokens=usage.get("cache_read_tokens", 0),
+            model=model,
+            provider=provider,
+            stop_reason=stop_reason,
+            raw_usage=usage,
+        )
+
+        if extractor and pricing:
+            breakdown = extractor.compute_cost(usage, pricing)
+            breakdown.model = model
+            breakdown.provider = provider
+            breakdown.stop_reason = stop_reason
+
+        return {
+            "request_id": request.request_id,
+            "timestamp": request.timestamp.isoformat(),
+            "provider": provider,
+            "model": model,
+            "stop_reason": stop_reason,
+            "usage": {
+                "input_tokens": breakdown.input_tokens,
+                "output_tokens": breakdown.output_tokens,
+                "cache_creation_tokens": breakdown.cache_creation_tokens,
+                "cache_read_tokens": breakdown.cache_read_tokens,
+            },
+            "cost": {
+                "input_cost": breakdown.input_cost,
+                "output_cost": breakdown.output_cost,
+                "cache_creation_cost": breakdown.cache_creation_cost,
+                "cache_read_cost": breakdown.cache_read_cost,
+                "total_cost": breakdown.total_cost,
+            },
+            "metadata": metadata,
+        }
+
+
 # Global pricing manager instance
 _pricing_manager = None
+_backend_orchestrator = None
 
 
 def get_pricing_manager() -> PricingManager:
@@ -179,3 +292,15 @@ def get_pricing_manager() -> PricingManager:
     if _pricing_manager is None:
         _pricing_manager = PricingManager()
     return _pricing_manager
+
+
+def get_backend_pricing_orchestrator(
+    on_persist: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
+) -> BackendPricingOrchestrator:
+    """Get or create global backend pricing orchestrator."""
+    global _backend_orchestrator
+    if _backend_orchestrator is None:
+        _backend_orchestrator = BackendPricingOrchestrator(on_persist=on_persist)
+    elif on_persist is not None:
+        _backend_orchestrator.on_persist = on_persist
+    return _backend_orchestrator

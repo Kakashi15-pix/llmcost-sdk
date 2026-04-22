@@ -1,6 +1,11 @@
 """Cost analytics and pricing module."""
 
-from pricing.manager import PricingManager, get_pricing_manager
+from pricing.manager import (
+    PricingManager,
+    BackendPricingOrchestrator,
+    get_pricing_manager,
+    get_backend_pricing_orchestrator,
+)
 from pricing.extractors import (
     CostExtractor,
     CostBreakdown,
@@ -22,12 +27,15 @@ from pricing.interceptor import (
     OpenAIInterceptor,
     wrap_anthropic_client,
     wrap_openai_client,
+    wrap_custom_client,
 )
 
 __all__ = [
     # Manager
     "PricingManager",
+    "BackendPricingOrchestrator",
     "get_pricing_manager",
+    "get_backend_pricing_orchestrator",
     # Extractors
     "CostExtractor",
     "CostBreakdown",
@@ -47,4 +55,5 @@ __all__ = [
     "OpenAIInterceptor",
     "wrap_anthropic_client",
     "wrap_openai_client",
+    "wrap_custom_client",
 ]

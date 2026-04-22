@@ -3,12 +3,10 @@ Request details buffer and backend flush mechanism.
 Accumulates request data extraction only, flushes to backend on threshold or timer.
 """
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Any, Optional, Callable
-import json
 import logging
 import threading
-import time
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +170,11 @@ class RequestDetailsBuffer:
         with self._lock:
             return self.buffer.copy()
 
+    def set_on_flush(self, on_flush: Optional[Callable[[List[RequestDetails]], None]]) -> None:
+        """Update flush callback used for backend batch handling."""
+        with self._lock:
+            self.on_flush = on_flush
+
     def clear(self) -> None:
         """Clear buffer and stop timer."""
         with self._lock:
@@ -196,6 +199,8 @@ def get_request_buffer(on_flush: Optional[Callable[[List[RequestDetails]], None]
     global _buffer
     if _buffer is None:
         _buffer = RequestDetailsBuffer(on_flush=on_flush)
+    elif on_flush is not None:
+        _buffer.set_on_flush(on_flush)
     return _buffer
 
 

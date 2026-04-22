@@ -18,6 +18,7 @@ from pricing import (
     OpenAIInterceptor,
     wrap_anthropic_client,
     wrap_openai_client,
+    wrap_custom_client,
     FLUSH_BATCH_SIZE,
     FLUSH_INTERVAL_SECONDS,
 )
@@ -49,4 +50,5 @@ __all__ = [
     "OpenAIInterceptor",
     "wrap_anthropic_client",
     "wrap_openai_client",
+    "wrap_custom_client",
 ]

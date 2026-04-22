@@ -2,7 +2,7 @@
 Interceptor middleware for LLM client libraries.
 Forwards request/response details to backend where extraction and cost computation happen.
 """
-from typing import Any, Optional, Dict
+from typing import Any, Optional, Dict, Callable, Tuple
 import logging
 import uuid
 
@@ -11,6 +11,31 @@ from pricing.extractors import CostBreakdown
 from pricing.aggregator import get_cost_aggregator
 
 logger = logging.getLogger(__name__)
+
+
+def _default_response_to_dict(response: Any) -> Dict[str, Any]:
+    """Best-effort response conversion for provider SDK objects."""
+    if isinstance(response, dict):
+        return response
+    if hasattr(response, "model_dump"):
+        return response.model_dump()
+    if hasattr(response, "dict"):
+        return response.dict()
+    if hasattr(response, "__dict__"):
+        return dict(response.__dict__)
+    return {"raw_response": str(response)}
+
+
+def _resolve_owner_and_attr(root: Any, attr_path: str) -> Tuple[Any, str]:
+    """Resolve dotted path to (owner_object, attribute_name)."""
+    if not attr_path or not isinstance(attr_path, str):
+        raise ValueError("method_path must be a non-empty string")
+
+    parts = attr_path.split(".")
+    owner = root
+    for part in parts[:-1]:
+        owner = getattr(owner, part)
+    return owner, parts[-1]
 
 
 class CostInterceptor:
@@ -195,3 +220,49 @@ def wrap_openai_client(client: Any) -> Any:
     """Convenience function to wrap OpenAI client."""
     interceptor = OpenAIInterceptor()
     return interceptor.wrap_client(client)
+
+
+def wrap_custom_client(
+    client: Any,
+    provider: str,
+    method_path: str,
+    response_to_dict: Optional[Callable[[Any], Dict[str, Any]]] = None,
+    interceptor: Optional[CostInterceptor] = None,
+    static_metadata: Optional[Dict[str, Any]] = None,
+) -> Any:
+    """
+    Wrap any provider client method using a dotted method path.
+
+    Args:
+        client: Client instance to wrap
+        provider: Provider name used in tracking payload
+        method_path: Dotted method path (e.g. 'responses.create', 'chat.completions.create')
+        response_to_dict: Optional converter for provider response objects
+        interceptor: Optional interceptor instance to reuse
+        static_metadata: Optional metadata merged into each tracked request
+
+    Returns:
+        Wrapped client (modified in place)
+    """
+    active_interceptor = interceptor or CostInterceptor()
+    converter = response_to_dict or _default_response_to_dict
+
+    owner, method_name = _resolve_owner_and_attr(client, method_path)
+    original_method = getattr(owner, method_name)
+
+    def wrapped_method(*args, **kwargs):
+        response = original_method(*args, **kwargs)
+        response_dict = converter(response)
+
+        metadata = dict(static_metadata or {})
+        metadata["method"] = method_path
+
+        active_interceptor.process_response(
+            response=response_dict,
+            provider=provider,
+            metadata=metadata,
+        )
+        return response
+
+    setattr(owner, method_name, wrapped_method)
+    return client
