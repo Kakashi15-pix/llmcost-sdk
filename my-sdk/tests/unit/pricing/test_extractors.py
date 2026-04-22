@@ -55,52 +55,14 @@ class TestAnthropicExtractor:
         
         assert model == "claude-3-opus-20240229"
 
-    def test_compute_cost(self):
-        """Test cost computation for Anthropic."""
-        usage = {
-            "input_tokens": 1_000_000,
-            "output_tokens": 100_000,
-            "cache_creation_tokens": 0,
-            "cache_read_tokens": 0,
-        }
-        
-        pricing = {
-            "input_cost_per_1m_tokens": 3.0,
-            "output_cost_per_1m_tokens": 15.0,
-            "cache_creation_cost_per_1m_tokens": 3.75,
-            "cache_read_cost_per_1m_tokens": 0.3,
-        }
+    def test_extract_stop_reason(self):
+        """Test extracting stop reason from response."""
+        response = {"stop_reason": "end_turn"}
         
         extractor = AnthropicExtractor()
-        cost = extractor.compute_cost(usage, pricing)
+        stop_reason = extractor.extract_stop_reason(response)
         
-        assert cost.input_cost == 3.0
-        assert cost.output_cost == 1.5
-        assert cost.total_cost == pytest.approx(4.5)
-
-    def test_compute_cost_with_cache(self):
-        """Test cost computation with cache tokens."""
-        usage = {
-            "input_tokens": 500_000,
-            "output_tokens": 50_000,
-            "cache_creation_tokens": 100_000,
-            "cache_read_tokens": 50_000,
-        }
-        
-        pricing = {
-            "input_cost_per_1m_tokens": 10.0,
-            "output_cost_per_1m_tokens": 30.0,
-            "cache_creation_cost_per_1m_tokens": 12.5,
-            "cache_read_cost_per_1m_tokens": 1.0,
-        }
-        
-        extractor = AnthropicExtractor()
-        cost = extractor.compute_cost(usage, pricing)
-        
-        assert cost.input_cost == 5.0
-        assert cost.output_cost == 1.5
-        assert cost.cache_creation_cost == 1.25
-        assert cost.cache_read_cost == 0.05
+        assert stop_reason == "end_turn"
 
 
 class TestOpenAIExtractor:
@@ -138,26 +100,14 @@ class TestOpenAIExtractor:
         
         assert usage["cache_read_tokens"] == 20
 
-    def test_compute_cost(self):
-        """Test cost computation for OpenAI."""
-        usage = {
-            "input_tokens": 1_000_000,
-            "output_tokens": 100_000,
-            "cache_creation_tokens": 0,
-            "cache_read_tokens": 0,
-        }
-        
-        pricing = {
-            "input_cost_per_1m_tokens": 10.0,
-            "output_cost_per_1m_tokens": 30.0,
-        }
+    def test_extract_model(self):
+        """Test extracting model from OpenAI response."""
+        response = {"model": "gpt-4-turbo"}
         
         extractor = OpenAIExtractor()
-        cost = extractor.compute_cost(usage, pricing)
+        model = extractor.extract_model(response)
         
-        assert cost.input_cost == 10.0
-        assert cost.output_cost == 3.0
-        assert cost.total_cost == pytest.approx(13.0)
+        assert model == "gpt-4-turbo"
 
 
 class TestExtractorRegistry:

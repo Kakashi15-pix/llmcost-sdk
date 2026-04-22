@@ -1,6 +1,7 @@
 """
-Provider-specific cost extraction and computation.
-Per-request usage extraction from API responses.
+Provider-specific usage extraction from API responses.
+Client-side extractors only extract usage/model/stop_reason.
+Cost computation is handled exclusively by backend orchestrator.
 """
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
@@ -11,8 +12,34 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class UsageBreakdown:
+    """Extracted usage information from an API response (no cost fields)."""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+    model: str = ""
+    provider: str = ""
+    stop_reason: Optional[str] = None
+    raw_usage: Dict[str, Any] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "cache_creation_tokens": self.cache_creation_tokens,
+            "cache_read_tokens": self.cache_read_tokens,
+            "model": self.model,
+            "provider": self.provider,
+            "stop_reason": self.stop_reason,
+            "raw_usage": self.raw_usage,
+        }
+
+
+@dataclass
 class CostBreakdown:
-    """Detailed cost breakdown for a request."""
+    """Full cost breakdown (backend-only). Includes usage + computed costs."""
     input_tokens: int = 0
     output_tokens: int = 0
     cache_creation_tokens: int = 0
@@ -47,7 +74,7 @@ class CostBreakdown:
 
 
 class CostExtractor(ABC):
-    """Base class for provider-specific cost extraction."""
+    """Base class for provider-specific usage extraction (client-side only)."""
 
     @abstractmethod
     def extract_usage(self, response: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -63,15 +90,6 @@ class CostExtractor(ABC):
     @abstractmethod
     def extract_model(self, response: Dict[str, Any]) -> Optional[str]:
         """Extract model name from API response."""
-        pass
-
-    @abstractmethod
-    def compute_cost(
-        self,
-        usage: Dict[str, int],
-        pricing: Dict[str, float],
-    ) -> CostBreakdown:
-        """Compute cost from usage and pricing."""
         pass
 
 
@@ -117,60 +135,6 @@ class AnthropicExtractor(CostExtractor):
         """Extract stop reason from Anthropic response."""
         return response.get("stop_reason")
 
-    def compute_cost(
-        self,
-        usage: Dict[str, int],
-        pricing: Dict[str, float],
-    ) -> CostBreakdown:
-        """
-        Compute cost for Anthropic request.
-        
-        Pricing fields:
-        - input_cost_per_1m_tokens
-        - output_cost_per_1m_tokens
-        - cache_creation_cost_per_1m_tokens (25% premium on input_rate)
-        - cache_read_cost_per_1m_tokens (10% of input_rate)
-        """
-        breakdown = CostBreakdown(
-            input_tokens=usage.get("input_tokens", 0),
-            output_tokens=usage.get("output_tokens", 0),
-            cache_creation_tokens=usage.get("cache_creation_tokens", 0),
-            cache_read_tokens=usage.get("cache_read_tokens", 0),
-            provider="anthropic",
-            raw_usage=usage,
-        )
-
-        # Get pricing rates
-        input_rate = pricing.get("input_cost_per_1m_tokens", 0)
-        output_rate = pricing.get("output_cost_per_1m_tokens", 0)
-        cache_creation_rate = pricing.get(
-            "cache_creation_cost_per_1m_tokens",
-            input_rate * 1.25,  # Default: 25% premium
-        )
-        cache_read_rate = pricing.get(
-            "cache_read_cost_per_1m_tokens",
-            input_rate * 0.1,  # Default: 10% of input
-        )
-
-        # Calculate costs (divide by 1M tokens)
-        breakdown.input_cost = (breakdown.input_tokens * input_rate) / 1_000_000
-        breakdown.output_cost = (breakdown.output_tokens * output_rate) / 1_000_000
-        breakdown.cache_creation_cost = (
-            breakdown.cache_creation_tokens * cache_creation_rate
-        ) / 1_000_000
-        breakdown.cache_read_cost = (
-            breakdown.cache_read_tokens * cache_read_rate
-        ) / 1_000_000
-        
-        breakdown.total_cost = (
-            breakdown.input_cost
-            + breakdown.output_cost
-            + breakdown.cache_creation_cost
-            + breakdown.cache_read_cost
-        )
-
-        return breakdown
-
 
 class OpenAIExtractor(CostExtractor):
     """OpenAI API response cost extraction."""
@@ -208,48 +172,6 @@ class OpenAIExtractor(CostExtractor):
     def extract_model(self, response: Dict[str, Any]) -> Optional[str]:
         """Extract model from OpenAI response."""
         return response.get("model")
-
-    def compute_cost(
-        self,
-        usage: Dict[str, int],
-        pricing: Dict[str, float],
-    ) -> CostBreakdown:
-        """
-        Compute cost for OpenAI request.
-        
-        Pricing fields:
-        - input_cost_per_1m_tokens
-        - output_cost_per_1m_tokens
-        - cache_read_cost_per_1m_tokens
-        """
-        breakdown = CostBreakdown(
-            input_tokens=usage.get("input_tokens", 0),
-            output_tokens=usage.get("output_tokens", 0),
-            cache_creation_tokens=usage.get("cache_creation_tokens", 0),
-            cache_read_tokens=usage.get("cache_read_tokens", 0),
-            provider="openai",
-            raw_usage=usage,
-        )
-
-        # Get pricing rates
-        input_rate = pricing.get("input_cost_per_1m_tokens", 0)
-        output_rate = pricing.get("output_cost_per_1m_tokens", 0)
-        cache_read_rate = pricing.get("cache_read_cost_per_1m_tokens", input_rate * 0.1)
-
-        # Calculate costs
-        breakdown.input_cost = (breakdown.input_tokens * input_rate) / 1_000_000
-        breakdown.output_cost = (breakdown.output_tokens * output_rate) / 1_000_000
-        breakdown.cache_read_cost = (
-            breakdown.cache_read_tokens * cache_read_rate
-        ) / 1_000_000
-        
-        breakdown.total_cost = (
-            breakdown.input_cost
-            + breakdown.output_cost
-            + breakdown.cache_read_cost
-        )
-
-        return breakdown
 
 
 # Provider registry

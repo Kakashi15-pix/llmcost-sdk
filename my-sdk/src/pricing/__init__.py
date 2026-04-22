@@ -8,6 +8,7 @@ from pricing.manager import (
 )
 from pricing.extractors import (
     CostExtractor,
+    UsageBreakdown,
     CostBreakdown,
     AnthropicExtractor,
     OpenAIExtractor,
@@ -38,6 +39,7 @@ __all__ = [
     "get_backend_pricing_orchestrator",
     # Extractors
     "CostExtractor",
+    "UsageBreakdown",
     "CostBreakdown",
     "AnthropicExtractor",
     "OpenAIExtractor",

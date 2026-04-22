@@ -252,11 +252,9 @@ class BackendPricingOrchestrator:
             raw_usage=usage,
         )
 
-        if extractor and pricing:
-            breakdown = extractor.compute_cost(usage, pricing)
-            breakdown.model = model
-            breakdown.provider = provider
-            breakdown.stop_reason = stop_reason
+        # Compute costs from pricing and usage (backend-only operation)
+        if pricing:
+            breakdown = self._compute_cost(usage, pricing, model, provider, stop_reason)
 
         return {
             "request_id": request.request_id,
@@ -279,6 +277,63 @@ class BackendPricingOrchestrator:
             },
             "metadata": metadata,
         }
+
+    def _compute_cost(
+        self,
+        usage: Dict[str, int],
+        pricing: Dict[str, float],
+        model: str,
+        provider: str,
+        stop_reason: Optional[str],
+    ) -> CostBreakdown:
+        """Compute cost from usage and pricing data (backend-only)."""
+        breakdown = CostBreakdown(
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+            cache_creation_tokens=usage.get("cache_creation_tokens", 0),
+            cache_read_tokens=usage.get("cache_read_tokens", 0),
+            model=model,
+            provider=provider,
+            stop_reason=stop_reason,
+            raw_usage=usage,
+        )
+
+        # Get pricing rates
+        input_rate = pricing.get("input_cost_per_1m_tokens", 0)
+        output_rate = pricing.get("output_cost_per_1m_tokens", 0)
+
+        # Provider-specific cache cost handling
+        if provider == "anthropic":
+            cache_creation_rate = pricing.get(
+                "cache_creation_cost_per_1m_tokens",
+                input_rate * 1.25,  # Default: 25% premium
+            )
+            cache_read_rate = pricing.get(
+                "cache_read_cost_per_1m_tokens",
+                input_rate * 0.1,  # Default: 10% of input
+            )
+        else:
+            cache_creation_rate = 0.0
+            cache_read_rate = pricing.get("cache_read_cost_per_1m_tokens", input_rate * 0.1)
+
+        # Calculate costs (divide by 1M tokens)
+        breakdown.input_cost = (breakdown.input_tokens * input_rate) / 1_000_000
+        breakdown.output_cost = (breakdown.output_tokens * output_rate) / 1_000_000
+        breakdown.cache_creation_cost = (
+            breakdown.cache_creation_tokens * cache_creation_rate
+        ) / 1_000_000
+        breakdown.cache_read_cost = (
+            breakdown.cache_read_tokens * cache_read_rate
+        ) / 1_000_000
+
+        breakdown.total_cost = (
+            breakdown.input_cost
+            + breakdown.output_cost
+            + breakdown.cache_creation_cost
+            + breakdown.cache_read_cost
+        )
+
+        return breakdown
 
 
 # Global pricing manager instance
