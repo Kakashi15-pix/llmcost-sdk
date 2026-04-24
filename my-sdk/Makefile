@@ -1,4 +1,4 @@
-.PHONY: help install install-dev test test-unit test-integration lint format clean build
+.PHONY: help install install-dev test test-unit test-integration test-auth lint format clean build
 
 help:
 	@echo "Available commands:"
@@ -7,6 +7,7 @@ help:
 	@echo "  make test             - Run all tests"
 	@echo "  make test-unit        - Run unit tests"
 	@echo "  make test-integration - Run integration tests"
+	@echo "  make test-auth        - Run auth-focused tests"
 	@echo "  make lint             - Run linting (ruff)"
 	@echo "  make format           - Format code (black)"
 	@echo "  make clean            - Clean build artifacts"
@@ -26,6 +27,9 @@ test-unit:
 
 test-integration:
 	pytest tests/integration/ -v --cov=src
+
+test-auth:
+	pytest tests/unit/auth/ tests/integration/test_auth_flow.py -v --cov=src
 
 lint:
 	ruff check src/ tests/ examples/
