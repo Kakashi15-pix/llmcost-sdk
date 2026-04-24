@@ -1,5 +1,6 @@
 """LLM Cost Observability SDK."""
 
+from client import CostAnalyticsClient
 from sdk import CostAnalyticsSDK, get_sdk
 from pricing import (
     PricingManager,
@@ -25,6 +26,8 @@ from pricing import (
 
 __version__ = "0.1.0"
 __all__ = [
+    # Authenticated analytics client
+    "CostAnalyticsClient",
     # Main SDK
     "CostAnalyticsSDK",
     "get_sdk",
