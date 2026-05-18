@@ -17,7 +17,6 @@ DEFAULT_AUTH_PATH = "/v1/auth/verify"
 
 @dataclass(frozen=True)
 class AuthContext:
-	"""Authenticated identity returned by the backend."""
 
 	user_id: str
 	api_key_id: str
@@ -158,6 +157,43 @@ class CostAnalyticsClient:
 			time.sleep(self.backoff_factor * (2**attempt))
 
 		raise RuntimeError("Request retry loop exited unexpectedly")
+
+	def submit_custom_pricing(
+		self,
+		*,
+		model: str,
+		provider: str,
+		input_cost_per_1m_tokens: float,
+		output_cost_per_1m_tokens: float,
+		cache_creation_cost_per_1m_tokens: Optional[float] = None,
+		cache_read_cost_per_1m_tokens: Optional[float] = None,
+		source: Optional[str] = None,
+		currency: str = "USD",
+		path: str = "/v1/pricing/custom",
+	) -> requests.Response:
+		"""Send client-supplied pricing data to the server for this account."""
+
+		payload: Dict[str, Any] = {
+			"model": model,
+			"provider": provider,
+			"input_cost_per_1m_tokens": input_cost_per_1m_tokens,
+			"output_cost_per_1m_tokens": output_cost_per_1m_tokens,
+			"currency": currency,
+		}
+		if cache_creation_cost_per_1m_tokens is not None:
+			payload["cache_creation_cost_per_1m_tokens"] = cache_creation_cost_per_1m_tokens
+		if cache_read_cost_per_1m_tokens is not None:
+			payload["cache_read_cost_per_1m_tokens"] = cache_read_cost_per_1m_tokens
+		if source is not None:
+			payload["source"] = source
+
+		return self.request(
+			"POST",
+			path,
+			json=payload,
+			provider=provider,
+			model=model,
+		)
 
 	def close(self) -> None:
 		"""Close the underlying HTTP session."""

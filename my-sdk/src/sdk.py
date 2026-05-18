@@ -6,11 +6,9 @@ import logging
 from pricing import (
     CostInterceptor,
     get_cost_aggregator,
-    get_pricing_manager,
-    wrap_anthropic_client,
-    wrap_openai_client,
     wrap_custom_client,
 )
+from api.telemetry import TelemetryClient
 
 logger = logging.getLogger(__name__)
 
@@ -29,56 +27,22 @@ class CostAnalyticsSDK:
         metrics = sdk.get_metrics()
     """
 
-    def __init__(self, auto_sync_pricing: bool = True):
+    def __init__(self, server_url: Optional[str] = None):
         """
         Initialize SDK.
         
         Args:
-            auto_sync_pricing: Automatically sync pricing from upstream daily
+            server_url: URL of the hosted telemetry server
         """
-        self.interceptor = CostInterceptor(auto_sync_pricing=auto_sync_pricing)
+        self.interceptor = CostInterceptor()
         self.aggregator = get_cost_aggregator()
-        self.pricing_manager = get_pricing_manager()
+        self.telemetry_client = None
 
-    def wrap_anthropic_client(self, client: Any) -> Any:
-        """
-        Wrap Anthropic client to track costs.
-        
-        Args:
-            client: Anthropic() instance
-        
-        Returns:
-            Wrapped client (modified in place)
-        
-        Example:
-            from anthropic import Anthropic
-            sdk = CostAnalyticsSDK()
-            client = Anthropic()
-            client = sdk.wrap_anthropic_client(client)
-            response = client.messages.create(...)
-        """
-        return wrap_anthropic_client(client)
+        if server_url:
+            self.telemetry_client = TelemetryClient(server_url=server_url)
+            self.aggregator.set_on_flush(self.telemetry_client.flush_batch)
 
-    def wrap_openai_client(self, client: Any) -> Any:
-        """
-        Wrap OpenAI client to track costs.
-        
-        Args:
-            client: OpenAI() instance
-        
-        Returns:
-            Wrapped client (modified in place)
-        
-        Example:
-            from openai import OpenAI
-            sdk = CostAnalyticsSDK()
-            client = OpenAI()
-            client = sdk.wrap_openai_client(client)
-            response = client.chat.completions.create(...)
-        """
-        return wrap_openai_client(client)
-
-    def wrap_custom_client(
+    def wrap_client(
         self,
         client: Any,
         provider: str,
@@ -87,12 +51,12 @@ class CostAnalyticsSDK:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Any:
         """
-        Wrap any provider client method path for tracking.
+        Generic client wrapper for any provider.
 
         Args:
             client: Provider SDK client instance
-            provider: Provider identifier (e.g. 'cohere', 'groq', 'mistral')
-            method_path: Dotted callable path on client
+            provider: Provider identifier (e.g. 'cohere', 'groq', 'mistral', 'anthropic', 'openai')
+            method_path: Dotted callable path on client (e.g. 'messages.create')
             response_to_dict: Optional response conversion function
             metadata: Optional static metadata attached to tracked request
 
@@ -125,7 +89,7 @@ class CostAnalyticsSDK:
             metadata: Optional metadata
         
         Returns:
-            Cost breakdown dict or None
+            Usage breakdown dict or None
         
         Example:
             cost = sdk.process_response(response, provider='anthropic')
@@ -158,31 +122,14 @@ class CostAnalyticsSDK:
         self.aggregator.flush()
         logger.info("Buffer flushed manually")
 
-    def sync_pricing(self) -> bool:
-        """
-        Manually trigger pricing sync from upstream.
-        
-        Returns:
-            True if sync successful, False otherwise (uses fallback)
-        """
-        return self.pricing_manager.sync_from_upstream()
-
-    def get_pricing(self, model: str, provider: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        """Get pricing for a model."""
-        return self.pricing_manager.get_pricing(model, provider=provider)
-
-    def get_pricing_data(self) -> Dict[str, Any]:
-        """Get all loaded pricing data."""
-        return self.pricing_manager.pricing_data
-
 
 # Global SDK instance
 _sdk_instance = None
 
 
-def get_sdk(auto_sync_pricing: bool = True) -> CostAnalyticsSDK:
+def get_sdk(server_url: Optional[str] = None) -> CostAnalyticsSDK:
     """Get or create global SDK instance."""
     global _sdk_instance
     if _sdk_instance is None:
-        _sdk_instance = CostAnalyticsSDK(auto_sync_pricing=auto_sync_pricing)
+        _sdk_instance = CostAnalyticsSDK(server_url=server_url)
     return _sdk_instance

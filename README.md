@@ -1,4 +1,4 @@
-# LLM Cost Observability SDK
+ # LLM Cost Observability SDK
 
 A production-ready, signal-plus-pull model SDK for **per-request cost analytics** across LLM providers (Anthropic, OpenAI, and extensible to others).
 

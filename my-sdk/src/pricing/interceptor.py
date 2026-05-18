@@ -6,8 +6,7 @@ from typing import Any, Optional, Dict, Callable, Tuple
 import logging
 import uuid
 
-from pricing.manager import get_pricing_manager
-from pricing.extractors import CostBreakdown
+from pricing.extractors import CostBreakdown, get_extractor
 from pricing.aggregator import get_cost_aggregator
 
 logger = logging.getLogger(__name__)
@@ -40,15 +39,8 @@ def _resolve_owner_and_attr(root: Any, attr_path: str) -> Tuple[Any, str]:
 
 class CostInterceptor:
 
-    def __init__(self, auto_sync_pricing: bool = True):
-        self.pricing_manager = get_pricing_manager()
+    def __init__(self):
         self.aggregator = get_cost_aggregator()
-        self.auto_sync_pricing = auto_sync_pricing
-
-    def sync_pricing(self) -> None:
-        if not self.auto_sync_pricing:
-            return
-        self.pricing_manager.sync_from_upstream()
 
     def process_response(
         self,
@@ -56,64 +48,54 @@ class CostInterceptor:
         provider: str,
         request_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
-    ) -> Optional[CostBreakdown]:
+    ) -> None:
         """
         Process API response to extract and record request details.
-        Extraction and cost computation are handled by backend.
+        Extraction happens locally, but cost computation is handled by backend.
         
         Args:
             response: API response dict from provider
             provider: Provider name ('anthropic', 'openai', etc.)
             request_id: Optional request tracking ID
             metadata: Optional metadata to attach to request
-        
-        Returns:
-            CostBreakdown placeholder (no local extraction/cost computation),
-            or None if request could not be recorded.
         """
         if not response:
             return None
 
         request_id = request_id or str(uuid.uuid4())
         request_metadata: Dict[str, Any] = dict(metadata or {})
-        request_metadata["raw_response"] = response
-        request_metadata["backend_extraction"] = True
+        
+        extractor = get_extractor(provider)
+        if not extractor:
+            logger.warning(f"No extractor found for provider: {provider}")
+            return None
 
-        # Keep lightweight local fields for observability only.
-        model = response.get("model", "unknown")
-        stop_reason = response.get("stop_reason")
+        usage = extractor.extract_usage(response) or {}
+        model = extractor.extract_model(response) or response.get("model", "unknown")
+        
+        stop_reason = None
+        if hasattr(extractor, "extract_stop_reason"):
+            stop_reason = extractor.extract_stop_reason(response)
+        if not stop_reason:
+            stop_reason = response.get("stop_reason")
 
-        # Placeholder object returned for compatibility with existing API.
-        cost_breakdown = CostBreakdown(
-            input_tokens=0,
-            output_tokens=0,
-            cache_creation_tokens=0,
-            cache_read_tokens=0,
-            model=model,
-            provider=provider,
-            stop_reason=stop_reason,
-            raw_usage={"backend_extraction": True},
-        )
-
-        # Record request details for backend extraction/costing.
+        # Record request details (tokens only, NO raw response) for backend costing.
         self.aggregator.record_request(
             request_id=request_id,
             model=model,
             provider=provider,
-            input_tokens=0,
-            output_tokens=0,
-            cache_read_tokens=0,
-            cache_creation_tokens=0,
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+            cache_read_tokens=usage.get("cache_read_tokens", 0),
+            cache_creation_tokens=usage.get("cache_creation_tokens", 0),
             stop_reason=stop_reason,
             metadata=request_metadata,
         )
 
         logger.debug(
-            f"Recorded request {request_id} for backend extraction "
-            f"({provider}/{model})"
+            f"Buffered usage for {request_id} "
+            f"({provider}/{model}): {usage}"
         )
-
-        return cost_breakdown
 
 
 class AnthropicInterceptor(CostInterceptor):

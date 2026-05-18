@@ -38,7 +38,7 @@ class UsageBreakdown:
 
 
 @dataclass
-class CostBreakdown:
+class ResponseBreakdown:
     """Full cost breakdown (backend-only). Includes usage + computed costs."""
     input_tokens: int = 0
     output_tokens: int = 0
@@ -46,8 +46,8 @@ class CostBreakdown:
     cache_read_tokens: int = 0
     input_cost: float = 0.0
     output_cost: float = 0.0
-    cache_creation_cost: float = 0.0
-    cache_read_cost: float = 0.0
+    cache_creation_input_tokens: Optional [float] = 0.0
+    cache_read_input_tokens: Optional [float] = 0.0
     total_cost: float = 0.0
     model: str = ""
     provider: str = ""
@@ -63,8 +63,8 @@ class CostBreakdown:
             "cache_read_tokens": self.cache_read_tokens,
             "input_cost": self.input_cost,
             "output_cost": self.output_cost,
-            "cache_creation_cost": self.cache_creation_cost,
-            "cache_read_cost": self.cache_read_cost,
+            "cache_creation_input_tokens": self.cache_creation_input_tokens,
+            "cache_read_input_tokens": self.cache_read_input_tokens,
             "total_cost": self.total_cost,
             "model": self.model,
             "provider": self.provider,
@@ -73,7 +73,7 @@ class CostBreakdown:
         }
 
 
-class CostExtractor(ABC):
+class UsageExtractor(ABC):
     """Base class for provider-specific usage extraction (client-side only)."""
 
     @abstractmethod
@@ -90,15 +90,16 @@ class CostExtractor(ABC):
     @abstractmethod
     def extract_model(self, response: Dict[str, Any]) -> Optional[str]:
         """Extract model name from API response."""
+        return response.get("model") 
         pass
 
 
-class AnthropicExtractor(CostExtractor):
-    """Anthropic API response cost extraction."""
+class Extractor(UsageExtractor):
+    """ API response cost extraction."""
 
     def extract_usage(self, response: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
-        Extract usage from Anthropic /v1/messages response.
+        Extract usage from  /v1/messages response.
         
         Response structure:
         {
@@ -113,71 +114,36 @@ class AnthropicExtractor(CostExtractor):
         """
         try:
             if "usage" not in response:
-                logger.warning("No usage field in Anthropic response")
+                logger.warning(f"No usage field in "{model}" response")
                 return None
 
             usage_obj = response["usage"]
             return {
                 "input_tokens": usage_obj.get("input_tokens", 0),
                 "output_tokens": usage_obj.get("output_tokens", 0),
-                "cache_creation_tokens": usage_obj.get("cache_creation_input_tokens", 0),
-                "cache_read_tokens": usage_obj.get("cache_read_input_tokens", 0),
+                "cache_creation_input_tokens": usage_obj.get("cache_creation_input_tokens", 0),
+                "cache_read_input_tokens": usage_obj.get("cache_read_input_tokens", 0),
             }
+            if "cache_creation_input_tokens"  not in usage_obj:
+                pass
         except (KeyError, TypeError) as e:
-            logger.error(f"Failed to extract usage from Anthropic response: {e}")
+            logger.error(f"Failed to extract usage from  response: {e}")
             return None
 
     def extract_model(self, response: Dict[str, Any]) -> Optional[str]:
-        """Extract model from Anthropic response."""
+        """Extract model from  response."""
         return response.get("model")
 
     def extract_stop_reason(self, response: Dict[str, Any]) -> Optional[str]:
-        """Extract stop reason from Anthropic response."""
+        """Extract stop reason from  response."""
         return response.get("stop_reason")
 
 
-class OpenAIExtractor(CostExtractor):
-    """OpenAI API response cost extraction."""
-
-    def extract_usage(self, response: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """
-        Extract usage from OpenAI response.
-        
-        Response structure:
-        {
-            "usage": {
-                "prompt_tokens": int,
-                "completion_tokens": int,
-                "cached_prompt_tokens": int (optional)
-            },
-            ...
-        }
-        """
-        try:
-            if "usage" not in response:
-                logger.warning("No usage field in OpenAI response")
-                return None
-
-            usage_obj = response["usage"]
-            return {
-                "input_tokens": usage_obj.get("prompt_tokens", 0),
-                "output_tokens": usage_obj.get("completion_tokens", 0),
-                "cache_read_tokens": usage_obj.get("cached_prompt_tokens", 0),
-                "cache_creation_tokens": 0,  # OpenAI doesn't separately track cache creation
-            }
-        except (KeyError, TypeError) as e:
-            logger.error(f"Failed to extract usage from OpenAI response: {e}")
-            return None
-
-    def extract_model(self, response: Dict[str, Any]) -> Optional[str]:
-        """Extract model from OpenAI response."""
-        return response.get("model")
 
 
 # Provider registry
 EXTRACTORS: Dict[str, type] = {
-    "anthropic": AnthropicExtractor,
-    "openai": OpenAIExtractor,
+    "": Extractor
 }
 
 
