@@ -62,6 +62,29 @@ class TestRequestDetailsBuffer:
         assert flush_called[0] == 50
         assert buffer.get_buffer_size() == 0
 
+    def test_flush_on_batch_threshold_is_rate_limited(self):
+        """Test batch flush defers when the flush budget is exhausted."""
+        flush_called = []
+
+        def on_flush(batch):
+            flush_called.append(len(batch))
+
+        buffer = RequestDetailsBuffer(on_flush=on_flush)
+        buffer._flush_timer.cancel()
+        buffer._batch_flush_limiter.acquire = lambda: False
+
+        for i in range(50):
+            buffer.record_request(
+                request_id=f"req_{i:03d}",
+                model="claude-3-opus-20240229",
+                provider="anthropic",
+                input_tokens=1000,
+                output_tokens=100,
+            )
+
+        assert flush_called == []
+        assert buffer.get_buffer_size() == 50
+
     def test_manual_flush(self):
         """Test manual flush call."""
         flush_called = []

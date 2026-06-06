@@ -1,17 +1,17 @@
  # LLM Cost Observability SDK
 
-A production-ready, signal-plus-pull model SDK for **per-request cost analytics** across LLM providers (Anthropic, OpenAI, and extensible to others).
+A production-ready, signal-plus-pull model SDK for **per-request usage analytics** across LLM providers (Anthropic, OpenAI, and extensible to others).
 
-**Key Design Principle**: Client credentials never leave client infrastructure. SDK intercepts API responses, extracts usage, computes costs, and aggregates locally.
+**Key Design Principle**: Client credentials never leave client infrastructure. SDK intercepts API responses, extracts usage locally, buffers request details, and optionally flushes them to a backend telemetry server.
 
 ## Features
 
 ✅ **Multi-Provider Support**: Anthropic, OpenAI, extensible architecture  
-✅ **Per-Request Cost Tracking**: Detailed cost breakdowns with token counts  
+✅ **Per-Request Usage Tracking**: Detailed request records with token counts  
 ✅ **Cache-Aware Pricing**: Handles cache creation/read tokens per provider  
 ✅ **Automatic Pricing Sync**: Daily sync from LiteLLM upstream with smart fallback  
 ✅ **Zero Data Exfiltration**: All processing on client side  
-✅ **Production Ready**: Aggregation, windowing, export, and alerting  
+✅ **Production Ready**: Request buffering, timer flush, and telemetry export  
 ✅ **Easy Integration**: Wrap existing clients with one line  
 
 ## Quick Start
@@ -26,11 +26,15 @@ pip install -e .
 
 ```python
 from anthropic import Anthropic
-from pricing import wrap_anthropic_client, get_cost_aggregator
+from pricing import wrap_anthropic_client
+from sdk import CostAnalyticsSDK
 
 # Create and wrap client
 client = Anthropic()
 client = wrap_anthropic_client(client)
+
+# Optional telemetry sink
+sdk = CostAnalyticsSDK(server_url="https://telemetry.example.com")
 
 # Use normally - costs tracked automatically
 response = client.messages.create(
@@ -39,19 +43,16 @@ response = client.messages.create(
     messages=[{"role": "user", "content": "What is AI?"}],
 )
 
-# Get metrics
-aggregator = get_cost_aggregator()
-metrics = aggregator.get_aggregated_metrics()
-print(f"Total cost: ${metrics.total_cost:.6f}")
-print(f"Total requests: {metrics.total_requests}")
-print(f"By model: {metrics.by_model}")
+# Inspect the local buffer and flush when needed
+print(sdk.get_metrics())
+sdk.flush_buffer()
 ```
 
 ### OpenAI Example
 
 ```python
 from openai import OpenAI
-from pricing import wrap_openai_client, get_cost_aggregator
+from pricing import wrap_openai_client
 
 client = OpenAI()
 client = wrap_openai_client(client)
@@ -61,31 +62,14 @@ response = client.chat.completions.create(
     messages=[{"role": "user", "content": "Hello!"}],
 )
 
-metrics = get_cost_aggregator().get_aggregated_metrics()
-print(f"Total cost: ${metrics.total_cost:.6f}")
+print("Request recorded locally and ready for flush")
 ```
 
 ## Architecture
 
 ### Signal-Plus-Pull Model
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Client Application (Your Code)                              │
-├─────────────────────────────────────────────────────────────┤
-│ + LLM Client (Anthropic/OpenAI)                             │
-│   └─ Wrapped with CostInterceptor                           │
-│      └─ Extracts usage from response (SIGNAL)               │
-│         └─ Looks up pricing (PULL from local/sync)          │
-│            └─ Computes cost + aggregates                    │
-└─────────────────────────────────────────────────────────────┘
-         ↓ (API call)
-    LLM Provider API (no creds exposed)
-         ↓ (response)
-    Pricing Sync (daily, silent fallback)
-         ↓
-    Local pricing.json (bundled fallback)
-```
+The SDK keeps provider credentials local, extracts usage from API responses, looks up pricing locally, and records request details in a buffer. If telemetry is configured, the buffer flushes batched request details to the backend through the telemetry client.
 
 ### Core Components
 
@@ -100,16 +84,21 @@ print(f"Total cost: ${metrics.total_cost:.6f}")
    - **OpenAI**: Maps `prompt_tokens` → `input_tokens`, `completion_tokens` → `output_tokens`, `cached_prompt_tokens` → `cache_read_tokens`
    - Provider-specific cost formulas with cache pricing
 
-3. **Cost Aggregator** (`src/pricing/aggregator.py`)
-   - Records per-request: timestamp, model, provider, tokens, cost, metadata
-   - Aggregates: total cost, by model, by provider, time windows
-   - Exports to JSON for integration with billing systems
+3. **Request Buffer** (`src/pricing/aggregator.py`)
+    - Records per-request: timestamp, request ID, model, provider, tokens, metadata
+    - Buffers locally and flushes on batch size or timer
+    - Exposes the pending request list for inspection/testing
 
-4. **Interceptor** (`src/pricing/interceptor.py`)
-   - Non-invasive wrapper around client library calls
-   - Routes to appropriate provider extractor
-   - Records to aggregator
-   - Provider-specific interceptors for easy wrapping
+4. **Telemetry Client** (`src/api/telemetry.py`)
+    - Sends flushed batches to the backend telemetry endpoint
+    - Attaches client ID and optional API key headers
+    - Plugs into the buffer via `set_on_flush`
+
+5. **Interceptor** (`src/pricing/interceptor.py`)
+    - Non-invasive wrapper around client library calls
+    - Routes to appropriate provider extractor
+    - Records to buffer
+    - Provider-specific interceptors for easy wrapping
 
 ## Cost Extraction Details
 
@@ -186,66 +175,35 @@ total_cost = input_cost + output_cost
 
 ## Usage Examples
 
-### Get Aggregated Metrics
+### Inspect the Local Buffer
 
 ```python
-from pricing import get_cost_aggregator
+from pricing import get_request_buffer
 
-agg = get_cost_aggregator()
-metrics = agg.get_aggregated_metrics()
+buffer = get_request_buffer()
 
-print(f"Total cost: ${metrics.total_cost:.6f}")
-print(f"Total requests: {metrics.total_requests}")
-print(f"By model: {metrics.by_model}")
-print(f"By provider: {metrics.by_provider}")
-print(f"Input tokens: {metrics.total_input_tokens}")
-print(f"Output tokens: {metrics.total_output_tokens}")
-print(f"Cache read tokens: {metrics.total_cache_read_tokens}")
-print(f"Cache creation tokens: {metrics.total_cache_creation_tokens}")
+print(f"Buffered requests: {buffer.get_buffer_size()}")
+for req in buffer.get_pending_requests():
+    print(f"{req.timestamp} | {req.provider} | {req.model} | {req.request_id}")
 ```
 
-### Time-Window Metrics
+### Flush Manually
 
 ```python
-# Last hour
-metrics_1h = agg.get_metrics_in_window(minutes=60)
+from pricing import get_request_buffer
 
-# Last 24 hours
-metrics_24h = agg.get_metrics_in_window(minutes=1440)
-
-print(f"Last hour: ${metrics_1h.total_cost:.6f}")
+buffer = get_request_buffer()
+buffer.flush()
 ```
 
-### Request-Level Details
+### Telemetry Flush
 
 ```python
-# Get all requests
-all_requests = agg.get_requests_in_window(minutes=60)
+from sdk import CostAnalyticsSDK
 
-for req in all_requests:
-    print(f"{req.timestamp} | {req.model} | ${req.total_cost:.6f}")
-```
-
-### Export Costs
-
-```python
-# Export all recorded requests
-agg.export_requests("costs.json")
-
-# File contains list of:
-# {
-#   "timestamp": "2024-01-15T10:30:45.123456",
-#   "request_id": "req_abc123",
-#   "model": "claude-3-opus-20240229",
-#   "provider": "anthropic",
-#   "total_cost": 0.001234,
-#   "input_tokens": 100,
-#   "output_tokens": 50,
-#   "cache_read_tokens": 0,
-#   "cache_creation_tokens": 0,
-#   "stop_reason": "end_turn",
-#   "metadata": {}
-# }
+sdk = CostAnalyticsSDK(server_url="https://telemetry.example.com")
+print(sdk.get_metrics())
+sdk.flush_buffer()
 ```
 
 ### Manual Cost Computation
@@ -432,53 +390,51 @@ pytest -s tests/
 
 ### Best Practices
 
-1. **Enable automatic pricing sync**:
+1. **Configure telemetry**:
    ```python
-   sdk = CostAnalyticsSDK(auto_sync_pricing=True)
+    from sdk import CostAnalyticsSDK
+
+    sdk = CostAnalyticsSDK(server_url="https://telemetry.example.com")
    ```
 
-2. **Monitor for sync failures**:
+2. **Monitor the local buffer**:
    ```python
-   manager = get_pricing_manager()
-   if manager.sync_state.get("sync_failures", 0) > 5:
-       logger.warning("Multiple pricing sync failures")
+    from pricing import get_request_buffer
+
+    buffer = get_request_buffer()
+    print(buffer.get_buffer_size())
    ```
 
-3. **Export metrics regularly**:
+3. **Flush pending requests regularly**:
    ```python
-   aggregator = get_cost_aggregator()
-   aggregator.export_requests("daily_costs.json")
+    from pricing import get_request_buffer
+
+    buffer = get_request_buffer()
+    buffer.flush()
    ```
 
-4. **Clear metrics periodically** (optional):
+4. **Clear the buffer periodically** (optional):
    ```python
-   # Keep only last 7 days
-   old_requests = [
-       r for r in aggregator.requests
-       if (datetime.utcnow() - r.timestamp).days > 7
-   ]
-   # Archive old_requests, then clear aggregator
+    from pricing import get_request_buffer
+
+    buffer = get_request_buffer()
+    buffer.clear()
    ```
 
 5. **Set up alerts** for:
-   - Single request costs exceeding threshold
-   - Cost anomalies (unusual increase for model)
-   - Pricing sync failures
+    - Buffered request volume exceeding expectations
+    - Telemetry flush failures
+    - Pricing sync failures
 
-### Integration with Billing Systems
+### Telemetry Handoff
 
 ```python
-# Export costs
-aggregator.export_requests("costs.json")
+from sdk import CostAnalyticsSDK
 
-# Upload to your billing system
-import json
-with open("costs.json") as f:
-    costs = json.load(f)
+sdk = CostAnalyticsSDK(server_url="https://telemetry.example.com")
 
-# Example: POST to your API
-import requests
-requests.post("https://billing.example.com/costs", json=costs)
+# When you are ready to hand data to your backend
+sdk.flush_buffer()
 ```
 
 ## Phase 2: Cloud Infrastructure Billing

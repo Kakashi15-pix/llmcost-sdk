@@ -8,6 +8,8 @@ from typing import Dict, List, Any, Optional, Callable
 import logging
 import threading
 
+from middleware.rate_limit import TokenBucket
+
 logger = logging.getLogger(__name__)
 
 # Flush constants
@@ -24,8 +26,8 @@ class RequestDetails:
     provider: str
     input_tokens: int
     output_tokens: int
-    cache_read_input_tokens: int = 0
-    cache_creation_input_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
     stop_reason: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -38,8 +40,8 @@ class RequestDetails:
             "provider": self.provider,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
-            "cache_read_input_tokens": self.cache_read_input_tokens,
-            "cache_creation_input_tokens": self.cache_creation_input_tokens,
+            "cache_read_tokens": self.cache_read_tokens,
+            "cache_creation_tokens": self.cache_creation_tokens,
             "stop_reason": self.stop_reason,
             "metadata": self.metadata,
         }
@@ -61,6 +63,7 @@ class RequestDetailsBuffer:
         self._lock = threading.RLock()
         self._last_flush_time = datetime.utcnow()
         self._flush_timer: Optional[threading.Timer] = None
+        self._batch_flush_limiter = TokenBucket(capacity=1, refill_rate=1 / FLUSH_INTERVAL_SECONDS)
         self._start_timer()
 
     def _start_timer(self) -> None:
@@ -93,8 +96,8 @@ class RequestDetailsBuffer:
         provider: str,
         input_tokens: int,
         output_tokens: int,
-        cache_read_input_tokens: int = 0,
-        cache_creation_input_tokens: int = 0,
+        cache_read_tokens: int = 0,
+        cache_creation_tokens: int = 0,
         stop_reason: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
@@ -119,8 +122,8 @@ class RequestDetailsBuffer:
             provider=provider,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            cache_read_input_tokens=cache_read_input_tokens,
-            cache_creation_input_tokens=cache_creation_input_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_creation_tokens=cache_creation_tokens,
             stop_reason=stop_reason,
             metadata=metadata or {},
         )
@@ -133,11 +136,15 @@ class RequestDetailsBuffer:
             )
 
             # Check if batch threshold reached
-            if len(self.buffer) >= FLUSH_BATCH_SIZE:
+            if len(self.buffer) >= FLUSH_BATCH_SIZE and self._batch_flush_limiter.acquire():
                 logger.debug(
                     f"Flushing {len(self.buffer)} requests due to batch size threshold"
                 )
                 self.flush()
+            elif len(self.buffer) >= FLUSH_BATCH_SIZE:
+                logger.debug(
+                    "Batch size threshold reached but flush budget is exhausted; waiting for timer"
+                )
 
     def flush(self) -> None:
         """Flush buffer to backend and clear."""
