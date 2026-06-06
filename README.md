@@ -1,193 +1,87 @@
- # LLM Cost Observability SDK
+# LLM Cost Observability SDK
 
-A production-ready, signal-plus-pull model SDK for **per-request usage analytics** across LLM providers (Anthropic, OpenAI, and extensible to others).
+Client-side SDK for provider response interception, usage extraction, request buffering, and optional telemetry flush to a backend cost pipeline.
+## What This SDK Does
 
-**Key Design Principle**: Client credentials never leave client infrastructure. SDK intercepts API responses, extracts usage locally, buffers request details, and optionally flushes them to a backend telemetry server.
+- Wraps provider SDK methods without changing normal response behavior.
+- Extracts usage metadata from provider responses locally.
+- Buffers request details in-memory.
+- Flushes buffered batches on size/time thresholds.
+- Optionally sends flushed batches to backend telemetry endpoint.
+- Supports lazy API-key verification for direct server API calls via `CostAnalyticsClient`.
 
-## Features
+## What This SDK Does Not Do On Client
 
-✅ **Multi-Provider Support**: Anthropic, OpenAI, extensible architecture  
-✅ **Per-Request Usage Tracking**: Detailed request records with token counts  
-✅ **Cache-Aware Pricing**: Handles cache creation/read tokens per provider  
-✅ **Automatic Pricing Sync**: Daily sync from LiteLLM upstream with smart fallback  
-✅ **Zero Data Exfiltration**: All processing on client side  
-✅ **Production Ready**: Request buffering, timer flush, and telemetry export  
-✅ **Easy Integration**: Wrap existing clients with one line  
+- Does not perform authoritative upstream pricing sync on the client.
+- Does not do final backend-grade cost computation in the main intercept-and-flush path.
+- Does not require provider credentials to leave the client environment.
 
-## Quick Start
+## Architecture (Current)
 
-### Installation
+1. Your app calls provider SDK (Anthropic/OpenAI/custom).
+2. Wrapped method runs, returns original provider response.
+3. Interceptor extracts usage/model/stop reason.
+4. `RequestDetailsBuffer` stores request details locally.
+5. Buffer flushes when:
+   - `FLUSH_BATCH_SIZE` reached (default `50`), or
+   - timer hits `FLUSH_INTERVAL_SECONDS` (default `30`).
+6. If telemetry is configured, flushed batch is POSTed to backend (`/v1/telemetry/flush` by default).
+7. Backend resolves pricing and computes final costs.
+
+## Package Layout (Relevant)
+
+- `my-sdk/src/sdk.py`: `CostAnalyticsSDK` facade.
+- `my-sdk/src/pricing/interceptor.py`: wrapping and extraction pipeline.
+- `my-sdk/src/pricing/extractors.py`: provider extractors.
+- `my-sdk/src/pricing/aggregator.py`: request buffer + flush triggers.
+- `my-sdk/src/api/telemetry.py`: telemetry sender with failed flush retention/retry behavior.
+- `my-sdk/src/client.py`: authenticated API client (`CostAnalyticsClient`) with lazy key verification.
+- `my-sdk/src/auth/Config.py`: env-based API key loading (`CA_API_KEY`).
+
+## Install
 
 ```bash
 pip install -e .
 ```
 
-### Basic Usage
+## Quick Start
+
+### 1) Wrap a Provider Client
 
 ```python
 from anthropic import Anthropic
-from pricing import wrap_anthropic_client
 from sdk import CostAnalyticsSDK
 
-# Create and wrap client
-client = Anthropic()
-client = wrap_anthropic_client(client)
-
-# Optional telemetry sink
 sdk = CostAnalyticsSDK(server_url="https://telemetry.example.com")
 
-# Use normally - costs tracked automatically
+client = Anthropic()
+client = sdk.wrap_client(
+    client=client,
+    provider="anthropic",
+    method_path="messages.create",
+)
+
 response = client.messages.create(
     model="claude-3-haiku-20240307",
-    max_tokens=100,
-    messages=[{"role": "user", "content": "What is AI?"}],
+    max_tokens=128,
+    messages=[{"role": "user", "content": "Hello"}],
 )
 
-# Inspect the local buffer and flush when needed
 print(sdk.get_metrics())
-sdk.flush_buffer()
 ```
 
-### OpenAI Example
+### 2) Convenience Wrappers
 
 ```python
+from anthropic import Anthropic
 from openai import OpenAI
-from pricing import wrap_openai_client
+from pricing import wrap_anthropic_client, wrap_openai_client
 
-client = OpenAI()
-client = wrap_openai_client(client)
-
-response = client.chat.completions.create(
-    model="gpt-3.5-turbo",
-    messages=[{"role": "user", "content": "Hello!"}],
-)
-
-print("Request recorded locally and ready for flush")
+anthropic_client = wrap_anthropic_client(Anthropic())
+openai_client = wrap_openai_client(OpenAI())
 ```
 
-## Architecture
-
-### Signal-Plus-Pull Model
-
-The SDK keeps provider credentials local, extracts usage from API responses, looks up pricing locally, and records request details in a buffer. If telemetry is configured, the buffer flushes batched request details to the backend through the telemetry client.
-
-### Core Components
-
-1. **Pricing Manager** (`src/pricing/manager.py`)
-   - Syncs from [LiteLLM upstream](https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json) daily
-   - Hash-diff detection: only updates on changes
-   - Silent fallback to bundled `pricing.json` on network failure
-   - Tracks sync state and failures
-
-2. **Cost Extractors** (`src/pricing/extractors.py`)
-   - **Anthropic**: Extracts `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`
-   - **OpenAI**: Maps `prompt_tokens` → `input_tokens`, `completion_tokens` → `output_tokens`, `cached_prompt_tokens` → `cache_read_tokens`
-   - Provider-specific cost formulas with cache pricing
-
-3. **Request Buffer** (`src/pricing/aggregator.py`)
-    - Records per-request: timestamp, request ID, model, provider, tokens, metadata
-    - Buffers locally and flushes on batch size or timer
-    - Exposes the pending request list for inspection/testing
-
-4. **Telemetry Client** (`src/api/telemetry.py`)
-    - Sends flushed batches to the backend telemetry endpoint
-    - Attaches client ID and optional API key headers
-    - Plugs into the buffer via `set_on_flush`
-
-5. **Interceptor** (`src/pricing/interceptor.py`)
-    - Non-invasive wrapper around client library calls
-    - Routes to appropriate provider extractor
-    - Records to buffer
-    - Provider-specific interceptors for easy wrapping
-
-## Cost Extraction Details
-
-### Anthropic `/v1/messages`
-
-**Usage fields extracted**:
-```python
-{
-    "input_tokens": int,
-    "output_tokens": int,
-    "cache_creation_input_tokens": int,  # Tokens cached for next request
-    "cache_read_input_tokens": int,      # Cached tokens reused
-}
-```
-
-**Cost formula**:
-```
-input_cost = (input_tokens * input_rate + cache_read_tokens * cache_read_rate) / 1_000_000
-output_cost = output_tokens * output_rate / 1_000_000
-cache_creation_cost = cache_creation_tokens * cache_creation_rate / 1_000_000
-total_cost = input_cost + output_cost + cache_creation_cost
-```
-
-**Cache pricing** (per LiteLLM):
-- `cache_read_rate` ≈ 10% of `input_rate` (90% discount on cached input)
-- `cache_creation_rate` ≈ 125% of `input_rate` (25% premium for creating cache)
-
-### OpenAI ChatCompletion
-
-**Usage fields extracted**:
-```python
-{
-    "input_tokens": prompt_tokens,
-    "output_tokens": completion_tokens,
-    "cache_read_tokens": cached_prompt_tokens,
-}
-```
-
-**Cost formula**:
-```
-input_cost = (input_tokens * input_rate + cache_read_tokens * cache_read_rate) / 1_000_000
-output_cost = output_tokens * output_rate / 1_000_000
-total_cost = input_cost + output_cost
-```
-
-## Pricing Format
-
-### Bundled Pricing File (`src/pricing/pricing.json`)
-
-```json
-{
-  "claude-3-opus-20240229": {
-    "input_cost_per_1m_tokens": 15.0,
-    "output_cost_per_1m_tokens": 75.0,
-    "cache_creation_cost_per_1m_tokens": 18.75,
-    "cache_read_cost_per_1m_tokens": 1.5
-  },
-  "gpt-3.5-turbo": {
-    "input_cost_per_1m_tokens": 0.50,
-    "output_cost_per_1m_tokens": 1.50,
-    "cache_read_cost_per_1m_tokens": 0.25
-  }
-}
-```
-
-### Upstream Sync Strategy
-
-- **Primary source**: LiteLLM's `model_prices_and_context_window.json`
-- **Sync interval**: Daily (configurable via `PRICING_SYNC_INTERVAL_HOURS`)
-- **Change detection**: Hash-based (only update on content change)
-- **Fallback**: Bundled `pricing.json` + logs warning
-- **State tracking**: Stored in `pricing_sync.json`
-- **Error handling**: Silent fallback on network errors, continues with local pricing
-
-## Usage Examples
-
-### Inspect the Local Buffer
-
-```python
-from pricing import get_request_buffer
-
-buffer = get_request_buffer()
-
-print(f"Buffered requests: {buffer.get_buffer_size()}")
-for req in buffer.get_pending_requests():
-    print(f"{req.timestamp} | {req.provider} | {req.model} | {req.request_id}")
-```
-
-### Flush Manually
+### 3) Manual Flush
 
 ```python
 from pricing import get_request_buffer
@@ -196,327 +90,126 @@ buffer = get_request_buffer()
 buffer.flush()
 ```
 
-### Telemetry Flush
+## Core APIs
 
-```python
-from sdk import CostAnalyticsSDK
+### `CostAnalyticsSDK` (`my-sdk/src/sdk.py`)
 
-sdk = CostAnalyticsSDK(server_url="https://telemetry.example.com")
-print(sdk.get_metrics())
-sdk.flush_buffer()
-```
+- `CostAnalyticsSDK(server_url: Optional[str] = None)`
+- `wrap_client(client, provider, method_path, response_to_dict=None, metadata=None)`
+- `process_response(response, provider, request_id=None, metadata=None)`
+- `get_metrics()`
+- `get_pending_requests()`
+- `flush_buffer()`
 
-### Manual Cost Computation
-
-```python
-from pricing import AnthropicExtractor, get_pricing_manager
-
-# Mock response from Anthropic API
-response = {
-    "model": "claude-3-opus-20240229",
-    "usage": {
-        "input_tokens": 1000,
-        "output_tokens": 500,
-        "cache_creation_input_tokens": 0,
-        "cache_read_input_tokens": 0,
-    },
-}
-
-# Extract and compute
-extractor = AnthropicExtractor()
-usage = extractor.extract_usage(response)
-
-pricing_mgr = get_pricing_manager()
-pricing = pricing_mgr.get_pricing("claude-3-opus-20240229")
-
-cost = extractor.compute_cost(usage, pricing)
-print(f"Input cost: ${cost.input_cost:.6f}")
-print(f"Output cost: ${cost.output_cost:.6f}")
-print(f"Total cost: ${cost.total_cost:.6f}")
-```
-
-## Adding New LLM Providers
-
-### Step 1: Create Provider Extractor
-
-```python
-# In src/pricing/extractors.py
-
-class MyProviderExtractor(CostExtractor):
-    """Extract costs from MyProvider API."""
-    
-    def extract_usage(self, response: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Extract usage fields from response."""
-        try:
-            usage_obj = response.get("usage_info", {})
-            return {
-                "input_tokens": usage_obj.get("prompt_tokens", 0),
-                "output_tokens": usage_obj.get("response_tokens", 0),
-                "cache_read_tokens": usage_obj.get("cached_tokens", 0),
-                "cache_creation_tokens": 0,
-            }
-        except Exception as e:
-            logger.error(f"Failed to extract usage: {e}")
-            return None
-    
-    def extract_model(self, response: Dict[str, Any]) -> Optional[str]:
-        """Extract model from response."""
-        return response.get("model_name")
-    
-    def compute_cost(self, usage: Dict[str, int], pricing: Dict[str, float]) -> CostBreakdown:
-        """Compute cost using provider-specific formula."""
-        breakdown = CostBreakdown(
-            input_tokens=usage.get("input_tokens", 0),
-            output_tokens=usage.get("output_tokens", 0),
-            cache_read_tokens=usage.get("cache_read_tokens", 0),
-            cache_creation_tokens=usage.get("cache_creation_tokens", 0),
-            provider="my-provider",
-            raw_usage=usage,
-        )
-        
-        input_rate = pricing.get("input_cost_per_1m_tokens", 0)
-        output_rate = pricing.get("output_cost_per_1m_tokens", 0)
-        
-        breakdown.input_cost = (breakdown.input_tokens * input_rate) / 1_000_000
-        breakdown.output_cost = (breakdown.output_tokens * output_rate) / 1_000_000
-        breakdown.total_cost = breakdown.input_cost + breakdown.output_cost
-        
-        return breakdown
-```
-
-### Step 2: Register in Extractors Dict
-
-```python
-EXTRACTORS: Dict[str, type] = {
-    "anthropic": AnthropicExtractor,
-    "openai": OpenAIExtractor,
-    "my-provider": MyProviderExtractor,  # Add here
-}
-```
-
-### Step 3: Add Pricing to `pricing.json`
+`get_metrics()` currently returns buffer-oriented metrics:
 
 ```json
 {
-  "my-model-v1": {
-    "input_cost_per_1m_tokens": 1.0,
-    "output_cost_per_1m_tokens": 2.0
-  }
+  "buffer_size": 12,
+  "pending_requests": 12
 }
 ```
 
-### Step 4: Create Optional Provider Interceptor
+### Buffer (`my-sdk/src/pricing/aggregator.py`)
+
+- `FLUSH_BATCH_SIZE = 50`
+- `FLUSH_INTERVAL_SECONDS = 30`
+- `get_request_buffer()` / `get_cost_aggregator()`
+- `RequestDetailsBuffer.record_request(...)`
+- `RequestDetailsBuffer.flush()`
+- `RequestDetailsBuffer.get_pending_requests()`
+
+### Telemetry (`my-sdk/src/api/telemetry.py`)
+
+`TelemetryClient` behavior:
+
+- Sends flush payload to `POST {server_url}/v1/telemetry/flush` (default endpoint path).
+- Includes headers:
+  - `Content-Type: application/json`
+  - `X-Client-ID: <uuid>`
+  - optional `Authorization: Bearer <api_key>`
+- On flush failure, retains up to last 5 failed batches in-memory.
+- If failure looks like "request not received", retries once immediately.
+- Failed batches are retried on subsequent flush attempts.
+
+## Auth for SDK-to-Server API Calls
+
+`CostAnalyticsClient` (`my-sdk/src/client.py`) supports direct authenticated calls to server APIs.
+
+- Reads `CA_API_KEY` when `api_key` not passed.
+- Performs lazy auth verification against `GET /v1/auth/verify` (default path).
+- Sends request metadata headers:
+  - `Authorization`
+  - `X-CA-Key-Id`
+  - `X-CA-User-Id`
+  - `X-Request-Id`
+  - `X-CA-Provider`
+  - `X-CA-Model`
+
+Example:
 
 ```python
-class MyProviderInterceptor(CostInterceptor):
-    """Wrapper for MyProvider client library."""
-    
-    def wrap_client(self, client: Any) -> Any:
-        """Wrap client to intercept calls."""
-        original_call = client.complete
-        
-        def wrapped(*args, **kwargs):
-            response = original_call(*args, **kwargs)
-            
-            response_dict = (
-                response.model_dump() if hasattr(response, 'model_dump')
-                else response.__dict__
-            )
-            
-            self.process_response(
-                response_dict,
-                provider='my-provider',
-                metadata={'method': 'complete'},
-            )
-            
-            return response
-        
-        client.complete = wrapped
-        return client
+from client import CostAnalyticsClient
+
+client = CostAnalyticsClient(
+    api_key="ca_live_...",
+    base_url="https://api.example.com",
+)
+
+resp = client.request("GET", "/v1/costs")
+print(resp.status_code)
 ```
 
-## Configuration
+## Environment Variables
 
-### Environment Variables
+- `CA_API_KEY`: client API key for `CostAnalyticsClient`.
+- `CA_API_BASE_URL`: optional base URL override for `CostAnalyticsClient`.
 
-```bash
-# Pricing sync interval (hours)
-export PRICING_SYNC_INTERVAL_HOURS=24
+Note: backend services may require additional variables (for example server HMAC secret) that are configured in the server repository.
 
-# Disable pricing sync
-export DISABLE_PRICING_SYNC=false
+## Backend Contract Expectations
+
+Telemetry flush endpoint should accept payload in this shape:
+
+```json
+{
+  "client_id": "uuid",
+  "batch": [
+    {
+      "timestamp": "2026-01-01T00:00:00.000000",
+      "request_id": "req-123",
+      "model": "claude-3-haiku-20240307",
+      "provider": "anthropic",
+      "input_tokens": 100,
+      "output_tokens": 50,
+      "cache_read_tokens": 0,
+      "cache_creation_tokens": 0,
+      "stop_reason": "end_turn",
+      "metadata": {"method": "messages.create"}
+    }
+  ]
+}
 ```
 
-### Programmatic Configuration
+Auth verification endpoint expected by `CostAnalyticsClient`:
 
-```python
-from pricing import get_pricing_manager
+- `GET /v1/auth/verify`
+- Response:
 
-manager = get_pricing_manager()
-
-# Manual sync
-manager.sync_from_upstream()
-
-# Check sync state
-print(manager.sync_state)
+```json
+{
+  "user_id": "...",
+  "api_key_id": "..."
+}
 ```
 
 ## Testing
 
 ```bash
-# Install dev dependencies
 pip install -e ".[dev]"
-
-# Run all tests
 pytest tests/ -v
-
-# Run with coverage
-pytest --cov=src tests/
-
-# Unit tests only
-pytest tests/unit/ -v
-
-# Integration tests only
-pytest tests/integration/ -v
-
-# Specific test file
-pytest tests/unit/pricing/test_extractors.py -v
-
-# Run with output
-pytest -s tests/
 ```
 
-## Production Deployment
+## Notes on Compatibility Surface
 
-### Best Practices
-
-1. **Configure telemetry**:
-   ```python
-    from sdk import CostAnalyticsSDK
-
-    sdk = CostAnalyticsSDK(server_url="https://telemetry.example.com")
-   ```
-
-2. **Monitor the local buffer**:
-   ```python
-    from pricing import get_request_buffer
-
-    buffer = get_request_buffer()
-    print(buffer.get_buffer_size())
-   ```
-
-3. **Flush pending requests regularly**:
-   ```python
-    from pricing import get_request_buffer
-
-    buffer = get_request_buffer()
-    buffer.flush()
-   ```
-
-4. **Clear the buffer periodically** (optional):
-   ```python
-    from pricing import get_request_buffer
-
-    buffer = get_request_buffer()
-    buffer.clear()
-   ```
-
-5. **Set up alerts** for:
-    - Buffered request volume exceeding expectations
-    - Telemetry flush failures
-    - Pricing sync failures
-
-### Telemetry Handoff
-
-```python
-from sdk import CostAnalyticsSDK
-
-sdk = CostAnalyticsSDK(server_url="https://telemetry.example.com")
-
-# When you are ready to hand data to your backend
-sdk.flush_buffer()
-```
-
-## Phase 2: Cloud Infrastructure Billing
-
-Future support for:
-- **AWS**: Cost & Usage Report (CUR) + Athena querying
-- **GCP**: BigQuery export integration
-- **Azure**: Cost Management API
-
-Same signal-plus-pull architecture: client pulls from cloud provider APIs, costs computed locally.
-
-## Architecture Decisions
-
-### Why Signal-Plus-Pull?
-
-- **Security**: Credentials never leave client infrastructure
-- **Privacy**: Cost data stays on client unless explicitly exported
-- **Reliability**: Works offline, no external dependencies for core tracking
-- **Scalability**: No central server bottleneck
-- **Compliance**: Fits HIPAA, SOC2, and other compliance requirements
-
-### Why LiteLLM for Pricing?
-
-- **Comprehensive**: Covers 100+ LLM models
-- **Current**: Updated regularly with new models
-- **Open source**: Community-maintained, no vendor lock-in
-- **Fallback**: Bundled pricing.json for offline operation
-
-### Cost Formula Justification
-
-Based on official provider documentation:
-- **Anthropic**: Input/output costs per 1M tokens, cache rates documented
-- **OpenAI**: Prices published per 1M tokens (prompt/completion)
-- **Cache pricing**: Based on provider's published discounts
-
-## Troubleshooting
-
-### Pricing not updating
-
-```python
-from pricing import get_pricing_manager
-
-manager = get_pricing_manager()
-
-# Check sync state
-print("Last sync:", manager.sync_state.get("last_sync"))
-print("Sync failures:", manager.sync_state.get("sync_failures"))
-
-# Force sync
-success = manager.sync_from_upstream()
-print("Sync success:", success)
-```
-
-### Missing pricing for model
-
-```python
-from pricing import get_pricing_manager
-
-manager = get_pricing_manager()
-
-# Check if model exists
-pricing = manager.get_pricing("my-model")
-print("Pricing found:", pricing is not None)
-
-# List available models
-print("Available models:", list(manager.pricing_data.keys())[:5])
-```
-
-### Costs seem wrong
-
-1. Verify API response has `usage` field
-2. Check pricing rates are correct for model
-3. Manually compute: `(tokens * rate) / 1_000_000`
-4. Compare with provider's dashboard
-
-## License
-
-MIT
-
-## Support
-
-For issues, questions, or contributions:
-- GitHub: [cost_analytics-SDK](https://github.com/your-org/cost_analytics-SDK)
-- Docs: See `docs/COST_ANALYTICS.md`
-- Examples: See `examples/` directory
+The `pricing` package exposes some compatibility aliases (`AnthropicExtractor`, `OpenAIExtractor`, `PricingManager`) to keep existing imports working. In this workspace snapshot, authoritative pricing manager behavior is expected on the backend side.
