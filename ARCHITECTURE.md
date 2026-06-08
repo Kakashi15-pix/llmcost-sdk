@@ -115,7 +115,7 @@ tests/
      }
    }
 
-3. AnthropicExtractor.extract_usage():
+3. Extractor.extract_usage():
    {
      "input_tokens": 100,
      "output_tokens": 50,
@@ -123,7 +123,19 @@ tests/
      "cache_read_tokens": 0
    }
 
-4. PricingManager.get_pricing("claude-3-opus-20240229"):
+4. SDK buffers request details for backend telemetry:
+   RequestDetails(
+     timestamp=datetime.utcnow(),
+     request_id="...",
+     model="claude-3-opus-20240229",
+     provider="anthropic",
+     input_tokens=100,
+     output_tokens=50,
+     cache_read_tokens=0,
+     cache_creation_tokens=0
+   )
+
+5. Backend PricingManager.get_pricing("claude-3-opus-20240229"):
    {
      "input_cost_per_1m_tokens": 15.0,
      "output_cost_per_1m_tokens": 75.0,
@@ -131,23 +143,10 @@ tests/
      "cache_read_cost_per_1m_tokens": 1.5
    }
 
-5. AnthropicExtractor.compute_cost():
+6. Backend computes cost:
    input_cost = (100 * 15.0) / 1_000_000 = 0.0015
    output_cost = (50 * 75.0) / 1_000_000 = 0.00375
    total_cost = 0.00525
-
-6. CostAggregator.record_request():
-   RequestCost(
-     timestamp=datetime.utcnow(),
-     request_id="...",
-     model="claude-3-opus-20240229",
-     provider="anthropic",
-     total_cost=0.00525,
-     input_tokens=100,
-     output_tokens=50,
-     cache_read_tokens=0,
-     cache_creation_tokens=0
-   )
 ```
 
 ### Example 2: Pricing Sync

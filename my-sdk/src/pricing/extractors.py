@@ -1,7 +1,7 @@
 """
-Provider-specific usage extraction from API responses.
-Client-side extractors only extract usage/model/stop_reason.
-Cost computation is handled exclusively by backend orchestrator.
+Generic usage extraction from API responses.
+Client-side extraction only captures usage/model/stop_reason.
+Cost computation is handled exclusively by the backend orchestrator.
 """
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
@@ -74,7 +74,7 @@ class ResponseBreakdown:
 
 
 class UsageExtractor(ABC):
-    """Base class for provider-specific usage extraction (client-side only)."""
+    """Base class for client-side usage extraction."""
 
     @abstractmethod
     def extract_usage(self, response: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -90,48 +90,54 @@ class UsageExtractor(ABC):
     @abstractmethod
     def extract_model(self, response: Dict[str, Any]) -> Optional[str]:
         """Extract model name from API response."""
-        return response.get("model") 
         pass
 
 
 class Extractor(UsageExtractor):
-    """ API response cost extraction."""
+    """Generic API response usage extraction."""
 
     def extract_usage(self, response: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
-        Extract usage from  /v1/messages response.
+        Extract usage from common response payloads.
         
         Response structure:
         {
             "usage": {
                 "input_tokens": int,
                 "output_tokens": int,
+                "prompt_tokens": int,
+                "completion_tokens": int,
                 "cache_creation_input_tokens": int (optional),
-                "cache_read_input_tokens": int (optional)
+                "cache_read_input_tokens": int (optional),
+                "cached_prompt_tokens": int (optional)
             },
             ...
         }
         """
         try:
             if "usage" not in response:
-                logger.warning(f'No usage field in "[model]" response')
+                logger.warning("No usage field in response")
                 return None
 
             usage_obj = response["usage"]
             return {
-                "input_tokens": usage_obj.get("input_tokens", 0),
-                "output_tokens": usage_obj.get("output_tokens", 0),
-                "cache_creation_input_tokens": usage_obj.get("cache_creation_input_tokens", 0),
-                "cache_read_input_tokens": usage_obj.get("cache_read_input_tokens", 0),
+                "input_tokens": usage_obj.get("input_tokens", usage_obj.get("prompt_tokens", 0)),
+                "output_tokens": usage_obj.get("output_tokens", usage_obj.get("completion_tokens", 0)),
+                "cache_creation_tokens": usage_obj.get(
+                    "cache_creation_tokens",
+                    usage_obj.get("cache_creation_input_tokens", 0),
+                ),
+                "cache_read_tokens": usage_obj.get(
+                    "cache_read_tokens",
+                    usage_obj.get("cache_read_input_tokens", usage_obj.get("cached_prompt_tokens", 0)),
+                ),
             }
-            if "cache_creation_input_tokens"  not in usage_obj:
-                pass
         except (KeyError, TypeError) as e:
-            logger.error(f"Failed to extract usage from  response: {e}")
+            logger.error(f"Failed to extract usage from response: {e}")
             return None
 
     def extract_model(self, response: Dict[str, Any]) -> Optional[str]:
-        """Extract model from  response."""
+        """Extract model from response."""
         return response.get("model")
 
     def extract_stop_reason(self, response: Dict[str, Any]) -> Optional[str]:
@@ -141,16 +147,9 @@ class Extractor(UsageExtractor):
 
 
 
-# Provider registry
-EXTRACTORS: Dict[str, type] = {
-    "": Extractor
-}
-
-
 def get_extractor(provider: str) -> Optional[UsageExtractor]:
-    """Return an extractor instance for the given provider."""
-    extractor_cls = EXTRACTORS.get(provider.lower()) if provider else None
-    if not extractor_cls:
+    """Return the generic extractor for any named provider."""
+    if not provider:
         return None
-    return extractor_cls()
+    return Extractor()
 

@@ -64,7 +64,7 @@ class TestCustomClientWrapper:
         assert pending.provider == "custom"
         assert pending.metadata["method"] == "responses.create"
         assert pending.metadata["source"] == "unit-test"
-        assert pending.metadata["raw_response"]["model"] == "custom-model-v1"
+        assert pending.model == "custom-model-v1"
 
     def test_wrap_custom_with_response_converter(self):
         client = _DummyDirectClient()
@@ -89,14 +89,14 @@ class TestCustomClientWrapper:
         pending = self.aggregator.get_pending_requests()[0]
         assert pending.provider == "direct"
         assert pending.metadata["method"] == "invoke"
-        assert pending.metadata["raw_response"]["model"] == "direct-model-v1"
+        assert pending.model == "direct-model-v1"
 
     def test_sdk_wrap_custom_reuses_sdk_interceptor(self):
         client = _DummyClient()
         sdk = CostAnalyticsSDK()
         self.aggregator.clear()
 
-        sdk.wrap_custom_client(
+        sdk.wrap_client(
             client=client,
             provider="sdk-custom",
             method_path="responses.create",

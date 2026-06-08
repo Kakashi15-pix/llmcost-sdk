@@ -10,11 +10,12 @@ from typing import Any, Callable, Dict, Optional
 
 import requests
 
+from api.routes import AUTH_VERIFY_PATH, CUSTOM_PRICING_PATH
 from auth.Config import ConfigError, get_api_key
 
 
 DEFAULT_BASE_URL = "http://localhost:8000"
-DEFAULT_AUTH_PATH = "/v1/auth/verify"
+DEFAULT_AUTH_PATH = AUTH_VERIFY_PATH
 
 
 @dataclass(frozen=True)
@@ -174,7 +175,7 @@ class CostAnalyticsClient:
 		cache_read_cost_per_1m_tokens: Optional[float] = None,
 		source: Optional[str] = None,
 		currency: str = "USD",
-		path: str = "/v1/pricing/custom",
+		path: str = CUSTOM_PRICING_PATH,
 	) -> requests.Response:
 		"""Send client-supplied pricing data to the server for this account."""
 

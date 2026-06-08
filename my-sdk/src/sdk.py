@@ -19,7 +19,7 @@ class CostAnalyticsSDK:
     
     Example:
         sdk = CostAnalyticsSDK()
-        sdk.wrap_anthropic_client(client)
+        sdk.wrap_client(client, provider="custom", method_path="responses.create")
         
         # Use client normally, costs tracked automatically
         response = client.messages.create(...)
@@ -80,7 +80,7 @@ class CostAnalyticsSDK:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
-        Manually process API response to extract cost.
+        Manually process API response to extract usage details.
         
         Args:
             response: API response dict
@@ -92,7 +92,7 @@ class CostAnalyticsSDK:
             Usage breakdown dict or None
         
         Example:
-            cost = sdk.process_response(response, provider='anthropic')
+            usage = sdk.process_response(response, provider="custom")
         """
         cost_breakdown = self.interceptor.process_response(
             response,

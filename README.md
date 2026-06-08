@@ -70,15 +70,18 @@ response = client.messages.create(
 print(sdk.get_metrics())
 ```
 
-### 2) Convenience Wrappers
+### 2) Wrap Other Client Shapes
 
 ```python
-from anthropic import Anthropic
-from openai import OpenAI
-from pricing import wrap_anthropic_client, wrap_openai_client
+from sdk import CostAnalyticsSDK
 
-anthropic_client = wrap_anthropic_client(Anthropic())
-openai_client = wrap_openai_client(OpenAI())
+sdk = CostAnalyticsSDK(server_url="https://telemetry.example.com")
+
+client = sdk.wrap_client(
+    client=client,
+    provider="custom-provider",
+    method_path="responses.create",
+)
 ```
 
 ### 3) Manual Flush
@@ -212,4 +215,4 @@ pytest tests/ -v
 
 ## Notes on Compatibility Surface
 
-The `pricing` package exposes some compatibility aliases (`AnthropicExtractor`, `OpenAIExtractor`, `PricingManager`) to keep existing imports working. In this workspace snapshot, authoritative pricing manager behavior is expected on the backend side.
+The SDK exposes one generic extractor/interceptor path. Provider names are metadata values passed to `wrap_client`; authoritative pricing resolution lives on the backend.
