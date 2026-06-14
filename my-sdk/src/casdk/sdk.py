@@ -3,12 +3,12 @@
 from typing import Any, Optional, Dict, Callable
 import logging
 
-from pricing import (
+from .pricing import (
     CostInterceptor,
     get_cost_aggregator,
     wrap_custom_client,
 )
-from api.telemetry import TelemetryClient
+from .api.telemetry import TelemetryClient
 
 logger = logging.getLogger(__name__)
 

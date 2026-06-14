@@ -1,4 +1,4 @@
-"""Client-side analytics API client with lazy API-key authentication."""
+#Client-side analytics API client with lazy API-key authentication.
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from typing import Any, Callable, Dict, Optional
 
 import requests
 
-from api.routes import AUTH_VERIFY_PATH, CUSTOM_PRICING_PATH
-from auth.Config import ConfigError, get_api_key
+from .api.routes import AUTH_VERIFY_PATH, CUSTOM_PRICING_PATH
+from .auth.config import ConfigError, get_api_key
 
 
 DEFAULT_BASE_URL = "http://localhost:8000"

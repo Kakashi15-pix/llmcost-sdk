@@ -31,10 +31,10 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["src"]
+package-dir = {"" = "src"}
 
-[tool.setuptools.package-dir]
-"" = "."
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.black]
 line-length = 88

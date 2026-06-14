@@ -1,31 +1,36 @@
-"""LLM Cost Observability SDK."""
+#Cost analytics and pricing module.
 
-from client import CostAnalyticsClient
-from sdk import CostAnalyticsSDK, get_sdk
-from pricing import (
-    CostExtractor,
-    CostBreakdown,
+from .extractors import (
+    UsageBreakdown,
+    ResponseBreakdown,
+    UsageExtractor,
+    Extractor,
     get_extractor,
+)
+from .aggregator import (
     RequestDetailsBuffer,
     RequestDetails,
     get_request_buffer,
     get_cost_aggregator,
-    CostInterceptor,
-    wrap_custom_client,
     FLUSH_BATCH_SIZE,
     FLUSH_INTERVAL_SECONDS,
 )
+from .interceptor import (
+    CostInterceptor,
+    wrap_custom_client,
+)
 
-__version__ = "0.1.0"
+CostExtractor = UsageExtractor
+CostBreakdown = ResponseBreakdown
+
 __all__ = [
-    # Authenticated analytics client
-    "CostAnalyticsClient",
-    # Main SDK
-    "CostAnalyticsSDK",
-    "get_sdk",
     # Extractors
     "CostExtractor",
+    "UsageBreakdown",
     "CostBreakdown",
+    "ResponseBreakdown",
+    "UsageExtractor",
+    "Extractor",
     "get_extractor",
     # Buffer (replaces aggregator)
     "RequestDetailsBuffer",

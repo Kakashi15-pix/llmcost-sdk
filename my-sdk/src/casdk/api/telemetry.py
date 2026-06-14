@@ -8,8 +8,8 @@ from typing import List, Optional
 
 import requests
 
-from api.routes import TELEMETRY_FLUSH_PATH
-from pricing.aggregator import RequestDetails
+from .routes import TELEMETRY_FLUSH_PATH
+from ..pricing.aggregator import RequestDetails
 
 logger = logging.getLogger(__name__)
 

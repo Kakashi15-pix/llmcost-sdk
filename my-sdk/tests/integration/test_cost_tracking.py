@@ -1,6 +1,6 @@
 """Integration tests for request-detail tracking."""
 
-from pricing import CostInterceptor, get_cost_aggregator
+from casdk.pricing import CostInterceptor, get_cost_aggregator
 
 
 class TestCostInterceptor:

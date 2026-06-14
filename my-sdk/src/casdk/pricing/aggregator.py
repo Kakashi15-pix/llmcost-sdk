@@ -8,7 +8,7 @@ from typing import Dict, List, Any, Optional, Callable
 import logging
 import threading
 
-from middleware.rate_limit import TokenBucket
+from ..middleware.rate_limit import TokenBucket
 
 logger = logging.getLogger(__name__)
 
