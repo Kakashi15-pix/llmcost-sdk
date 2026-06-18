@@ -1,10 +1,9 @@
-"""LLM Cost Observability SDK."""
+#LLM Cost Observability SDK.
 
 from .client import CostAnalyticsClient
 from .sdk import CostAnalyticsSDK, get_sdk
 from .pricing import (
     CostExtractor,
-    CostBreakdown,
     get_extractor,
     RequestDetailsBuffer,
     RequestDetails,
@@ -25,7 +24,6 @@ __all__ = [
     "get_sdk",
     # Extractors
     "CostExtractor",
-    "CostBreakdown",
     "get_extractor",
     # Buffer (replaces aggregator)
     "RequestDetailsBuffer",

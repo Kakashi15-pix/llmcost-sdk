@@ -1,4 +1,4 @@
-"""Main SDK client for unified cost tracking."""
+#Main SDK client for unified cost tracking.
 
 from typing import Any, Optional, Dict, Callable
 import logging
@@ -107,29 +107,37 @@ class CostAnalyticsSDK:
         return None
 
     def get_metrics(self) -> Dict[str, Any]:
-        """Get request buffer size and pending requests (metrics now computed on backend)."""
+        #Get request buffer size and pending requests (metrics now computed on backend).
         return {
             "buffer_size": self.aggregator.get_buffer_size(),
             "pending_requests": len(self.aggregator.get_pending_requests()),
         }
 
     def get_pending_requests(self) -> list:
-        """Get all pending requests awaiting flush to backend."""
+        #Get all pending requests awaiting flush to backend.
         return [r.to_dict() for r in self.aggregator.get_pending_requests()]
 
     def flush_buffer(self) -> None:
-        """Manually flush the request buffer to backend."""
+        #Manually flush the request buffer to backend.
         self.aggregator.flush()
         logger.info("Buffer flushed manually")
+    def shutdown(self) -> None:
+     self.flush()
+     with self._lock:
+        if self._flush_timer:
+            self._flush_timer.cancel()
+            self._flush_timer = None
 
+    logger.info("Buffer shutdown complete")
 
 # Global SDK instance
 _sdk_instance = None
 
 
 def get_sdk(server_url: Optional[str] = None) -> CostAnalyticsSDK:
-    """Get or create global SDK instance."""
+    #Get or create global SDK instance.
     global _sdk_instance
     if _sdk_instance is None:
         _sdk_instance = CostAnalyticsSDK(server_url=server_url)
     return _sdk_instance
+

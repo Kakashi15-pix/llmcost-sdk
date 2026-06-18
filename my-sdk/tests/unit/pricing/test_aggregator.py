@@ -1,8 +1,8 @@
-"""Tests for request details buffer."""
+#Tests for request details buffer.
 
 import pytest
 from datetime import datetime, timedelta
-from casdk.pricing.aggregator import RequestDetailsBuffer, RequestDetails
+from casdk.pricing import RequestDetailsBuffer, RequestDetails
 
 
 class TestRequestDetailsBuffer:
@@ -262,3 +262,24 @@ class TestRequestDetailsBuffer:
         
         assert len(anthropic_requests) == 3
         assert len(openai_requests) == 2
+        
+    def test_shutdown_flushes_remaining_requests(self):
+     flushed_batches = []
+
+     buffer = RequestDetailsBuffer(
+        on_flush=lambda batch: flushed_batches.append(batch)
+    )
+
+     buffer.record_request(
+        request_id="1",
+        model="gpt-4o",
+        provider="openai",
+        input_tokens=10,
+        output_tokens=5,
+    )
+
+     buffer.shutdown()
+
+     assert len(flushed_batches) == 1
+     assert len(flushed_batches[0]) == 1
+     assert buffer.get_buffer_size() == 0

@@ -2,7 +2,6 @@
 
 from .extractors import (
     UsageBreakdown,
-    ResponseBreakdown,
     UsageExtractor,
     Extractor,
     get_extractor,
@@ -21,14 +20,11 @@ from .interceptor import (
 )
 
 CostExtractor = UsageExtractor
-CostBreakdown = ResponseBreakdown
 
 __all__ = [
     # Extractors
     "CostExtractor",
     "UsageBreakdown",
-    "CostBreakdown",
-    "ResponseBreakdown",
     "UsageExtractor",
     "Extractor",
     "get_extractor",

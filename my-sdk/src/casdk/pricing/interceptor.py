@@ -1,12 +1,12 @@
 """
 Interceptor middleware for LLM client libraries.
-Forwards request/response details to backend where extraction and cost computation happen.
+Forwards request/response and telemetry details to backend where cost computation happen.
 """
 from typing import Any, Optional, Dict, Callable, Tuple
 import logging
 import uuid
 
-from .extractors import ResponseBreakdown, get_extractor
+from .extractors import get_extractor
 from .aggregator import get_cost_aggregator
 
 logger = logging.getLogger(__name__)

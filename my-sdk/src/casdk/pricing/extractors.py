@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class UsageBreakdown:
-    """Extracted usage information from an API response (no cost fields)."""
+    #Extracted usage information from an API response (no cost fields).
     input_tokens: int = 0
     output_tokens: int = 0
     cache_creation_tokens: int = 0
@@ -24,48 +24,12 @@ class UsageBreakdown:
     raw_usage: Dict[str, Any] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary."""
+        #Convert to dictionary.
         return {
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "cache_creation_tokens": self.cache_creation_tokens,
             "cache_read_tokens": self.cache_read_tokens,
-            "model": self.model,
-            "provider": self.provider,
-            "stop_reason": self.stop_reason,
-            "raw_usage": self.raw_usage,
-        }
-
-
-@dataclass
-class ResponseBreakdown:
-    """Full cost breakdown (backend-only). Includes usage + computed costs."""
-    input_tokens: int = 0
-    output_tokens: int = 0
-    cache_creation_tokens: int = 0
-    cache_read_tokens: int = 0
-    input_cost: float = 0.0
-    output_cost: float = 0.0
-    cache_creation_input_tokens: Optional [float] = 0.0
-    cache_read_input_tokens: Optional [float] = 0.0
-    total_cost: float = 0.0
-    model: str = ""
-    provider: str = ""
-    stop_reason: Optional[str] = None
-    raw_usage: Dict[str, Any] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "input_tokens": self.input_tokens,
-            "output_tokens": self.output_tokens,
-            "cache_creation_tokens": self.cache_creation_tokens,
-            "cache_read_tokens": self.cache_read_tokens,
-            "input_cost": self.input_cost,
-            "output_cost": self.output_cost,
-            "cache_creation_input_tokens": self.cache_creation_input_tokens,
-            "cache_read_input_tokens": self.cache_read_input_tokens,
-            "total_cost": self.total_cost,
             "model": self.model,
             "provider": self.provider,
             "stop_reason": self.stop_reason,

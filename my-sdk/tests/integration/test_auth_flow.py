@@ -1,4 +1,4 @@
-"""Integration tests for end-to-end SDK API-key auth flow."""
+#Integration tests for end-to-end SDK API-key auth flow.
 
 from __future__ import annotations
 
