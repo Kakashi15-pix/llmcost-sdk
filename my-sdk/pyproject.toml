@@ -3,22 +3,29 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cost-analytics-sdk"
+name = "llmcost-sdk"
 version = "0.1.0"
 description = "Multi-provider LLM cost observability SDK"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
-    {name = "Cost Analytics", email = "team@example.com"}
+    {name = "Jyotir Nandan", email = "jyotirnandan92129@gmail.com"}
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
 dependencies = [
     "requests>=2.31.0",
     "pydantic>=2.0.0",
-    "python-dotenv>=1.0.0",
     "httpx>=0.24.0",
 ]
+[project.urls]
+Repository = "https://github.com/Kakashi15-pix/llmcost-sdk"
 
 [project.optional-dependencies]
 dev = [
