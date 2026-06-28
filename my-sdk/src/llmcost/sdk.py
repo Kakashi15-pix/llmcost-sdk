@@ -2,7 +2,7 @@
 
 from typing import Any, Optional, Dict, Callable
 import logging
-
+from .client import DEFAULT_BASE_URL, DEFAULT_AUTH_PATH, AuthContext, AuthenticationError
 from .pricing import (
     CostInterceptor,
     get_cost_aggregator,
@@ -27,20 +27,11 @@ class CostAnalyticsSDK:
         metrics = sdk.get_metrics()
     """
 
-    def __init__(self, server_url: Optional[str] = None):
-        """
-        Initialize SDK.
-        
-        Args:
-            server_url: URL of the hosted telemetry server
-        """
-        self.interceptor = CostInterceptor()
-        self.aggregator = get_cost_aggregator()
-        self.telemetry_client = None
-
-        if server_url:
-            self.telemetry_client = TelemetryClient(server_url=server_url)
-            self.aggregator.set_on_flush(self.telemetry_client.flush_batch)
+    def __init__(self):
+     self.interceptor = CostInterceptor()
+     self.aggregator = get_cost_aggregator()
+     self.telemetry_client = TelemetryClient(server_url=DEFAULT_BASE_URL)
+     self.aggregator.set_on_flush(self.telemetry_client.flush_batch)
 
     def wrap_client(
         self,

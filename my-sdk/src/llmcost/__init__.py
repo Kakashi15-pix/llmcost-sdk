@@ -1,6 +1,6 @@
 #LLM Cost Observability SDK.
 
-from .client import CostAnalyticsClient,AuthenticationError
+from .client import CostAnalyticsClient,AuthenticationError, DEFAULT_BASE_URL, DEFAULT_AUTH_PATH, AuthContext
 from .sdk import CostAnalyticsSDK, get_sdk
 from .pricing import (
     CostExtractor,
