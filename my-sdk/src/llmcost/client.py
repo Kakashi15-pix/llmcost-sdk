@@ -14,7 +14,7 @@ from .api.routes import AUTH_VERIFY_PATH, CUSTOM_PRICING_PATH
 from .auth.config import ConfigError, get_api_key
 
 
-DEFAULT_BASE_URL = "http://localhost:8000"
+DEFAULT_BASE_URL = "https://server-sidesdk-production.up.railway.app"
 DEFAULT_AUTH_PATH = AUTH_VERIFY_PATH
 
 
